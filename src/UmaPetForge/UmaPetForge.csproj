@@ -1,0 +1,71 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>UmaPetForge</AssemblyName>
+    <RootNamespace>UmaPetForge</RootNamespace>
+    <VersionPrefix>0.2.0</VersionPrefix>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <UmaViewerDir Condition="'$(UmaViewerDir)' == ''">$(UMAVIEWER_DIR)</UmaViewerDir>
+    <UmaViewerManagedDir>$(UmaViewerDir)/UmaViewer_Data/Managed</UmaViewerManagedDir>
+    <BepInExCoreDir>$(UmaViewerDir)/BepInEx/core</BepInExCoreDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="netstandard">
+      <HintPath>$(UmaViewerManagedDir)/netstandard.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx">
+      <HintPath>$(BepInExCoreDir)/BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="umamusume">
+      <HintPath>$(UmaViewerManagedDir)/umamusume.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(UmaViewerManagedDir)/UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(UmaViewerManagedDir)/UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AnimationModule">
+      <HintPath>$(UmaViewerManagedDir)/UnityEngine.AnimationModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AssetBundleModule">
+      <HintPath>$(UmaViewerManagedDir)/UnityEngine.AssetBundleModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(UmaViewerManagedDir)/UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(UmaViewerManagedDir)/UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(UmaViewerManagedDir)/UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.Postprocessing.Runtime">
+      <HintPath>$(UmaViewerManagedDir)/Unity.Postprocessing.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="ValidateUmaViewerReferences" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(UmaViewerDir)' == ''" Text="Set UMAVIEWER_DIR or pass -p:UmaViewerDir=/path/to/UmaViewer." />
+    <Error Condition="!Exists('$(UmaViewerDir)/UmaViewer.exe')" Text="UmaViewer.exe was not found under '$(UmaViewerDir)'." />
+    <Error Condition="!Exists('$(UmaViewerManagedDir)/umamusume.dll')" Text="umamusume.dll was not found under '$(UmaViewerManagedDir)'." />
+    <Error Condition="!Exists('$(BepInExCoreDir)/BepInEx.dll')" Text="BepInEx.dll was not found under '$(BepInExCoreDir)'. Install BepInEx 5 x64 into UmaViewer first." />
+  </Target>
+</Project>

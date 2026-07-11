@@ -1,0 +1,22 @@
+# Optional UmaPetForge per-character motion overrides.
+# Copy this file beside UmaViewer.exe as UmaPetForge_Overrides.csv.
+# Keep comments only to retain the automatic default motions.
+#
+# Format:
+# character_id,state,motion_key_or_exact_asset_path
+# Use exactly three unquoted fields; commas inside values are not supported.
+#
+# Use * for a compatible general motion applied to every selected character.
+# Exact character rows override a matching * row.
+# Use auto on an exact character row to opt that character out of a wildcard.
+# Valid states: idle, run_right, run_left, wave, jump, failure, waiting, working, review
+#
+# Examples (remove # to enable):
+# 1001,idle,-4064598427829042606
+# *,wave,4494058001413988142
+# 1001,wave,auto
+#
+# Slow Windows idle experiment: enable one general loop, export one character,
+# and compare it with automatic before choosing a project default.
+# *,idle,3d/motion/mini/event/body/type00/anm_min_eve_type00_sudachi02_loop
+# *,idle,3d/motion/mini/event/body/type00/anm_min_eve_type00_pose03_loop

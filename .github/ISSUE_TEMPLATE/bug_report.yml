@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a reproducible exporter failure
+title: "[bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not upload game data, extracted assets, generated sprite sheets, or private paths. Logs and asset identifiers are usually enough.
+  - type: input
+    id: version
+    attributes:
+      label: UmaPetForge version
+      placeholder: v0.2.0
+    validations:
+      required: true
+  - type: input
+    id: umaviewer
+    attributes:
+      label: UmaViewer release
+      placeholder: Release tag or commit
+    validations:
+      required: true
+  - type: dropdown
+    id: region
+    attributes:
+      label: Game region
+      options: [Global, Japan, Korea, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include the character, resolved clip names, and the last status message.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized log excerpt
+      render: text

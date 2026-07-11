@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose an exporter, resolver, validation, or packaging improvement
+title: "[feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow is blocked or unnecessarily manual?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Asset boundary
+      options:
+        - label: This proposal does not require distributing game assets or extracted content.
+          required: true

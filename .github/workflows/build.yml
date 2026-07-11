@@ -1,0 +1,141 @@
+name: Build UmaPetForge
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      uma_viewer_url:
+        description: Optional UmaViewer.zip URL used only for compile-time managed references
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      DEFAULT_UMAVIEWER_URL: https://github.com/katboi01/UmaViewer/releases/latest/download/UmaViewer.zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Download compile-time references
+        shell: pwsh
+        env:
+          REQUESTED_UMAVIEWER_URL: ${{ inputs.uma_viewer_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $viewerUrl = $env:REQUESTED_UMAVIEWER_URL
+          if ([string]::IsNullOrWhiteSpace($viewerUrl)) {
+            $viewerUrl = $env:DEFAULT_UMAVIEWER_URL
+          }
+
+          $viewerArchive = Join-Path $env:RUNNER_TEMP "UmaViewer.zip"
+          $viewerExtract = Join-Path $env:RUNNER_TEMP "UmaViewer"
+          Invoke-WebRequest $viewerUrl -OutFile $viewerArchive
+          Expand-Archive $viewerArchive -DestinationPath $viewerExtract -Force
+          $viewerExe = Get-ChildItem $viewerExtract -Filter UmaViewer.exe -File -Recurse | Select-Object -First 1
+          if (-not $viewerExe) {
+            throw "UmaViewer.exe was not present in the downloaded archive."
+          }
+
+          $releaseHeaders = @{
+            Accept = "application/vnd.github+json"
+            Authorization = "Bearer $env:GH_TOKEN"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $release = Invoke-RestMethod "https://api.github.com/repos/BepInEx/BepInEx/releases/latest" -Headers $releaseHeaders
+          $asset = $release.assets | Where-Object { $_.name -match '^BepInEx_win_x64_.*\.zip$' } | Select-Object -First 1
+          if (-not $asset) {
+            throw "The latest BepInEx release has no Windows x64 Mono archive."
+          }
+          $bepArchive = Join-Path $env:RUNNER_TEMP "BepInEx.zip"
+          Invoke-WebRequest $asset.browser_download_url -OutFile $bepArchive -Headers $releaseHeaders
+          Expand-Archive $bepArchive -DestinationPath $viewerExe.Directory.FullName -Force
+
+          "UMAVIEWER_DIR=$($viewerExe.Directory.FullName)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Set build version
+        shell: pwsh
+        run: |
+          [xml]$project = Get-Content "src/UmaPetForge/UmaPetForge.csproj"
+          $projectVersion = [string]($project.Project.PropertyGroup.VersionPrefix | Select-Object -First 1)
+          if ([string]::IsNullOrWhiteSpace($projectVersion)) {
+            throw "VersionPrefix is missing from UmaPetForge.csproj."
+          }
+
+          $pluginSource = Get-Content "src/UmaPetForge/UmaPetForgePlugin.cs" -Raw
+          $pluginVersionMatch = [regex]::Match($pluginSource, 'PluginVersion\s*=\s*"([^"]+)"')
+          if (-not $pluginVersionMatch.Success) {
+            throw "PluginVersion is missing from UmaPetForgePlugin.cs."
+          }
+          $pluginVersion = $pluginVersionMatch.Groups[1].Value
+          if ($pluginVersion -ne $projectVersion) {
+            throw "Version mismatch: csproj=$projectVersion, plugin=$pluginVersion."
+          }
+
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}".TrimStart("v")
+            $sourceVersion = $version.Split("-")[0]
+            if ($sourceVersion -ne $projectVersion) {
+              throw "Tag version v$version does not match source version $projectVersion."
+            }
+          } else {
+            $version = "$projectVersion-ci.${{ github.run_number }}"
+          }
+          "VERSION=$version" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build and package
+        shell: pwsh
+        run: ./scripts/build.ps1 -UmaViewerDir "$env:UMAVIEWER_DIR" -Version "$env:VERSION"
+
+      - name: Create release archive
+        shell: pwsh
+        run: |
+          $archive = "artifacts/UmaPetForge-$env:VERSION.zip"
+          Compress-Archive -Path "artifacts/package/*" -DestinationPath $archive -Force
+          $checksum = "$archive.sha256"
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path $archive -Leaf)" | Set-Content $checksum -Encoding ascii
+          "RELEASE_ARCHIVE=$archive" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "RELEASE_CHECKSUM=$checksum" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UmaPetForge-${{ env.VERSION }}
+          path: |
+            ${{ env.RELEASE_ARCHIVE }}
+            ${{ env.RELEASE_CHECKSUM }}
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: UmaPetForge-*
+          path: release
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
