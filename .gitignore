@@ -1,0 +1,11 @@
+artifacts/
+artifacts-v*/
+UmaPetForge_Output/
+**/bin/
+**/obj/
+*.user
+*.suo
+.vs/
+.idea/
+__pycache__/
+*.pyc
