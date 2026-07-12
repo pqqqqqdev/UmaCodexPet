@@ -80,6 +80,14 @@ asset-name rules and deterministic tie-breaking over opaque heuristics. Record
 the chosen asset identifiers in diagnostic output so users can reproduce an
 export without distributing the assets themselves.
 
+## Releases
+
+Release only a commit that has passed CI and a local UmaViewer smoke test.
+After the version in the project and plugin sources matches, create a branch
+named `release/vX.Y.Z` at the current default-branch commit. The workflow
+rejects stale release branches, rebuilds the package, creates the matching
+`vX.Y.Z` tag and GitHub release, and uploads both the ZIP and SHA-256 file.
+
 ## Licensing
 
 By submitting a contribution, you agree that it may be distributed under the

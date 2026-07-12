@@ -2,7 +2,7 @@ name: Build UmaCodexPet
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, "release/v*"]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -19,6 +19,9 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish_release: ${{ steps.version.outputs.publish_release }}
     env:
       DEFAULT_UMAVIEWER_URL: https://github.com/katboi01/UmaViewer/releases/latest/download/UmaViewer.zip
 
@@ -66,7 +69,11 @@ jobs:
           "UMAVIEWER_DIR=$($viewerExe.Directory.FullName)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Set build version
+        id: version
         shell: pwsh
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           [xml]$project = Get-Content "src/UmaCodexPet/UmaCodexPet.csproj"
           $projectVersion = [string]($project.Project.PropertyGroup.VersionPrefix | Select-Object -First 1)
@@ -84,16 +91,59 @@ jobs:
             throw "Version mismatch: csproj=$projectVersion, plugin=$pluginVersion."
           }
 
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $version = "${{ github.ref_name }}".TrimStart("v")
-            $sourceVersion = $version.Split("-")[0]
-            if ($sourceVersion -ne $projectVersion) {
-              throw "Tag version v$version does not match source version $projectVersion."
+          $publishRelease = "false"
+          $releaseFromBranch = $false
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $version = $env:GITHUB_REF_NAME.TrimStart("v")
+            $publishRelease = "true"
+          } elseif ($env:GITHUB_REF -like "refs/heads/release/v*") {
+            $version = $env:GITHUB_REF_NAME.Substring("release/v".Length)
+            $publishRelease = "true"
+            $releaseFromBranch = $true
+
+            $headers = @{
+              Accept = "application/vnd.github+json"
+              Authorization = "Bearer $env:GH_TOKEN"
+              "X-GitHub-Api-Version" = "2022-11-28"
+            }
+            $defaultRef = Invoke-RestMethod `
+              "https://api.github.com/repos/$env:GITHUB_REPOSITORY/git/ref/heads/$env:DEFAULT_BRANCH" `
+              -Headers $headers
+            if ($defaultRef.object.sha -ne $env:GITHUB_SHA) {
+              throw "Release branches must point exactly at the current $env:DEFAULT_BRANCH commit."
             }
           } else {
             $version = "$projectVersion-ci.${{ github.run_number }}"
           }
+
+          if ($publishRelease -eq "true") {
+            if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') {
+              throw "Release version '$version' does not match the supported format."
+            }
+            $sourceVersion = $version.Split("-")[0]
+            if ($sourceVersion -ne $projectVersion) {
+              throw "Release version v$version does not match source version $projectVersion."
+            }
+
+            if ($releaseFromBranch) {
+              $tagStatus = 0
+              $null = Invoke-RestMethod `
+                "https://api.github.com/repos/$env:GITHUB_REPOSITORY/git/ref/tags/v$version" `
+                -Headers $headers `
+                -SkipHttpErrorCheck `
+                -StatusCodeVariable tagStatus
+              if ([int]$tagStatus -eq 200) {
+                throw "Tag v$version already exists; refusing to replace published release assets."
+              }
+              if ([int]$tagStatus -ne 404) {
+                throw "Could not verify tag v$version (GitHub returned HTTP $tagStatus)."
+              }
+            }
+          }
+
           "VERSION=$version" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "version=$version" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "publish_release=$publishRelease" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Build and package
         shell: pwsh
@@ -119,14 +169,35 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.build.outputs.publish_release == 'true'
     needs: build
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ needs.build.outputs.version }}
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: write
 
     steps:
+      - name: Refuse to overwrite an existing release tag
+        if: github.ref_type == 'branch'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v${{ needs.build.outputs.version }}
+        run: |
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG")"
+          case "$status" in
+            404) ;;
+            200) echo "::error title=Release tag already exists::$RELEASE_TAG already exists; refusing to overwrite its assets."; exit 1 ;;
+            *) echo "::error title=Tag preflight failed::GitHub returned HTTP $status."; exit 1 ;;
+          esac
+
       - uses: actions/download-artifact@v4
         with:
           pattern: UmaCodexPet-*
@@ -137,5 +208,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release/*
+          fail_on_unmatched_files: true
           generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          name: UmaCodexPet v${{ needs.build.outputs.version }}
+          overwrite_files: false
+          prerelease: ${{ contains(needs.build.outputs.version, '-') }}
+          tag_name: v${{ needs.build.outputs.version }}
+          target_commitish: ${{ github.sha }}
