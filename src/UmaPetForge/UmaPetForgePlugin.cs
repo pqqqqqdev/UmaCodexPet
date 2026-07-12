@@ -13,11 +13,12 @@ using UnityEngine.Rendering.PostProcessing;
 namespace UmaPetForge
 {
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
+    [DefaultExecutionOrder(-10000)]
     public sealed class UmaPetForgePlugin : BaseUnityPlugin
     {
         public const string PluginGuid = "dev.pqqqqq.umapetforge";
         public const string PluginName = "UmaPetForge";
-        public const string PluginVersion = "0.2.0";
+        public const string PluginVersion = "0.3.0";
 
         private const int CellWidth = 192;
         private const int CellHeight = 208;
@@ -26,6 +27,10 @@ namespace UmaPetForge
         private const int SupersampleFactor = 4;
         private const int CaptureWidth = CellWidth * SupersampleFactor;
         private const int CaptureHeight = CellHeight * SupersampleFactor;
+        private const float PickerMinimumWidth = 560f;
+        private const float PickerMinimumHeight = 360f;
+        private const float PickerResizeHandleSize = 22f;
+        private const int PickerResizeControlHint = 0x554D42;
 
         private static readonly int[][] StateSpriteIndices =
         {
@@ -73,21 +78,57 @@ namespace UmaPetForge
         private ConfigEntry<bool> _writeIndividualFrames;
         private ConfigEntry<string> _motionOverridesFile;
         private ConfigEntry<string> _characterCostumes;
+        private ConfigEntry<string> _characterStateMotions;
+        private ConfigEntry<string> _characterStateFaces;
         private Dictionary<string, string> _motionOverrides =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, string> _configuredPickerMotions =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, MiniFaceSelection> _configuredPickerFaces =
+            new Dictionary<string, MiniFaceSelection>(StringComparer.OrdinalIgnoreCase);
         private Dictionary<int, string> _configuredCostumes = new Dictionary<int, string>();
         private Dictionary<int, List<MiniCostumeOption>> _miniCostumeOptions =
             new Dictionary<int, List<MiniCostumeOption>>();
         private readonly HashSet<int> _pickerSelected = new HashSet<int>();
         private readonly Dictionary<int, string> _pickerCostumes = new Dictionary<int, string>();
+        private readonly Dictionary<string, string> _pickerStateMotions =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, MiniFaceSelection> _pickerStateFaces =
+            new Dictionary<string, MiniFaceSelection>(StringComparer.OrdinalIgnoreCase);
         private List<CharaEntry> _pickerCharacters = new List<CharaEntry>();
+        private List<UmaDatabaseEntry> _pickerMiniMotions = new List<UmaDatabaseEntry>();
         private Rect _pickerWindowRect;
+        private bool _pickerWindowInitialized;
+        private bool _pickerResizePending;
+        private Vector2 _pickerResizeOffset;
+        private Vector2 _pickerRequestedSize;
         private Vector2 _pickerScroll;
         private Vector2 _pickerCostumeScroll;
+        private Vector2 _pickerStateScroll;
+        private Vector2 _pickerMotionScroll;
         private string _pickerSearch = string.Empty;
         private string _pickerCostumeSearch = string.Empty;
+        private string _pickerMotionSearch = string.Empty;
+        private string _pickerMotionState = string.Empty;
+        private string _pickerFaceState = string.Empty;
         private string _pickerStatus = string.Empty;
         private int _pickerCostumeCharacterId = -1;
+        private int _pickerMotionCharacterId = -1;
+        private MiniFaceSelection _pickerFaceDraft;
+        private MiniFaceMaterials _pickerFacePreviewMaterials;
+        private UmaContainerCharacter _pickerFacePreviewContainer;
+        private UmaContainerCharacter _pickerFacePreviewAttemptContainer;
+        private bool _pickerPreviewRequested;
+        private bool _pickerPreviewLoading;
+        private int _pickerPreviewCharacterId = -1;
+        private string _pickerPreviewCostumeId = string.Empty;
+        private UmaDatabaseEntry _pickerPreviewMotion;
+        private string _pickerPreviewError = string.Empty;
+        private bool _pickerInputIsolationActive;
+        private bool _pickerPreviousInteractionInProgress;
+        private CameraOrbit _pickerCameraOrbit;
+        private bool _pickerCameraOrbitWasEnabled;
+        private bool _pickerSuppressInputNextFrame;
         private bool _pickerOpen;
         private PickerAction _pickerAction;
         private bool _exportRequested;
@@ -130,6 +171,16 @@ namespace UmaPetForge
                 "CharacterCostumes",
                 "",
                 "Semicolon-separated characterId=miniCostumeId choices managed by the F6 picker.");
+            _characterStateMotions = Config.Bind(
+                "General",
+                "CharacterStateMotions",
+                "",
+                "Semicolon-separated characterId:state=motionKey choices managed by the F6 picker.");
+            _characterStateFaces = Config.Bind(
+                "General",
+                "CharacterStateFaces",
+                "",
+                "Semicolon-separated characterId:state=eyeL,eyeR,mouth,browL,browR choices managed by the F6 picker.");
 
             if (string.Equals(
                     _characters.Value,
@@ -152,9 +203,43 @@ namespace UmaPetForge
                 return;
             }
 
-            if (Input.GetKeyDown(KeyCode.F6))
+            bool pickerTogglePressed = Input.GetKeyDown(KeyCode.F6);
+            bool catalogPressed = Input.GetKeyDown(KeyCode.F7);
+            bool exportPressed = Input.GetKeyDown(KeyCode.F8);
+            if (_pickerOpen)
             {
-                if (_running)
+                // The picker is modal. Clear legacy input before the viewer's
+                // normal controls update so wheel, drag, and held buttons do
+                // not also move its camera or edit controls behind the picker.
+                Input.ResetInputAxes();
+                MaintainPickerInputIsolation();
+            }
+            else if (_pickerSuppressInputNextFrame)
+            {
+                Input.ResetInputAxes();
+                _pickerSuppressInputNextFrame = false;
+            }
+
+            if (_pickerPreviewRequested && !_pickerPreviewLoading && !_running)
+            {
+                _pickerPreviewRequested = false;
+                _pickerPreviewLoading = true;
+                StartCoroutine(LoadPickerPreview(
+                    _pickerPreviewCharacterId,
+                    _pickerPreviewCostumeId,
+                    _pickerPreviewMotion));
+                return;
+            }
+
+            if (pickerTogglePressed)
+            {
+                if (IsPickerPreviewBusy())
+                {
+                    ShowViewerMessage(
+                        "UmaPetForge Mini preview is still loading",
+                        UIMessageType.Default);
+                }
+                else if (_running)
                 {
                     ShowViewerMessage("UmaPetForge export is already running", UIMessageType.Default);
                 }
@@ -162,6 +247,11 @@ namespace UmaPetForge
                 {
                     ToggleCharacterPicker();
                 }
+                return;
+            }
+
+            if (IsPickerPreviewBusy())
+            {
                 return;
             }
 
@@ -183,7 +273,7 @@ namespace UmaPetForge
                 return;
             }
 
-            if (Input.GetKeyDown(KeyCode.F7))
+            if (catalogPressed)
             {
                 _running = true;
                 try
@@ -205,8 +295,9 @@ namespace UmaPetForge
                 return;
             }
 
-            if (Input.GetKeyDown(KeyCode.F8))
+            if (exportPressed)
             {
+                RestorePickerFacePreview();
                 if (_pickerOpen && !SavePickerSelection(true))
                 {
                     return;
@@ -224,7 +315,7 @@ namespace UmaPetForge
                         return;
                     }
                 }
-                _pickerOpen = false;
+                SetPickerOpen(false);
                 StartCoroutine(ExportBatch());
             }
         }
@@ -246,11 +337,18 @@ namespace UmaPetForge
             GUI.depth = -1000;
             try
             {
-                _pickerWindowRect = GUI.Window(
+                Rect nextWindowRect = GUI.ModalWindow(
                     GetInstanceID() ^ PickerWindowId,
                     _pickerWindowRect,
                     DrawCharacterPicker,
                     "UmaPetForge Pet Picker");
+                if (_pickerResizePending)
+                {
+                    nextWindowRect.width = _pickerRequestedSize.x;
+                    nextWindowRect.height = _pickerRequestedSize.y;
+                    _pickerResizePending = false;
+                }
+                _pickerWindowRect = nextWindowRect;
                 ClampPickerWindowRect();
             }
             finally
@@ -263,7 +361,8 @@ namespace UmaPetForge
         {
             if (_pickerOpen)
             {
-                _pickerOpen = false;
+                RestorePickerFacePreview();
+                SetPickerOpen(false);
                 return;
             }
 
@@ -275,13 +374,85 @@ namespace UmaPetForge
                 _pickerStatus = string.Empty;
                 _pickerCostumeCharacterId = -1;
                 _pickerCostumeSearch = string.Empty;
-                _pickerOpen = true;
+                _pickerMotionCharacterId = -1;
+                _pickerMotionState = string.Empty;
+                _pickerStateScroll = Vector2.zero;
+                _pickerMotionSearch = string.Empty;
+                _pickerFaceState = string.Empty;
+                _pickerFaceDraft = null;
+                _pickerFacePreviewMaterials = null;
+                _pickerFacePreviewContainer = null;
+                _pickerFacePreviewAttemptContainer = null;
+                _pickerPreviewRequested = false;
+                _pickerPreviewLoading = false;
+                _pickerPreviewCharacterId = -1;
+                _pickerPreviewCostumeId = string.Empty;
+                _pickerPreviewMotion = null;
+                _pickerPreviewError = string.Empty;
+                SetPickerOpen(true);
             }
             catch (Exception exception)
             {
                 Logger.LogError(exception);
                 ShowViewerMessage("UmaPetForge picker failed — check log", UIMessageType.Error);
             }
+        }
+
+        private void SetPickerOpen(bool open)
+        {
+            if (open)
+            {
+                if (!_pickerInputIsolationActive)
+                {
+                    _pickerPreviousInteractionInProgress =
+                        HandleManager.InteractionInProgress;
+                    _pickerCameraOrbit = CameraOrbit.instance;
+                    _pickerCameraOrbitWasEnabled =
+                        _pickerCameraOrbit != null && _pickerCameraOrbit.enabled;
+                    _pickerInputIsolationActive = true;
+                }
+
+                _pickerOpen = true;
+                MaintainPickerInputIsolation();
+                return;
+            }
+
+            _pickerOpen = false;
+            _pickerResizePending = false;
+            _pickerSuppressInputNextFrame = true;
+            if (!_pickerInputIsolationActive)
+            {
+                return;
+            }
+
+            HandleManager.InteractionInProgress =
+                _pickerPreviousInteractionInProgress;
+            if (_pickerCameraOrbit != null)
+            {
+                _pickerCameraOrbit.enabled = _pickerCameraOrbitWasEnabled;
+            }
+            _pickerCameraOrbit = null;
+            _pickerInputIsolationActive = false;
+        }
+
+        private void MaintainPickerInputIsolation()
+        {
+            HandleManager.InteractionInProgress = true;
+            if (_pickerCameraOrbit == null && CameraOrbit.instance != null)
+            {
+                _pickerCameraOrbit = CameraOrbit.instance;
+                _pickerCameraOrbitWasEnabled = _pickerCameraOrbit.enabled;
+            }
+            if (_pickerCameraOrbit != null)
+            {
+                _pickerCameraOrbit.enabled = false;
+            }
+        }
+
+        private void OnDisable()
+        {
+            RestorePickerFacePreview();
+            SetPickerOpen(false);
         }
 
         private void LoadPickerSelection()
@@ -292,6 +463,7 @@ namespace UmaPetForge
                 .ThenBy(character => character.GetName(), StringComparer.Ordinal)
                 .ToList();
             _miniCostumeOptions = BuildMiniCostumeCatalog(_pickerCharacters);
+            _pickerMiniMotions = GetMiniMotions();
             var availableIds = new HashSet<int>(_pickerCharacters.Select(character => character.Id));
             _pickerSelected.Clear();
             foreach (CharaEntry character in ResolveRoster(_characters.Value))
@@ -309,25 +481,72 @@ namespace UmaPetForge
                     _pickerCostumes[choice.Key] = choice.Value;
                 }
             }
+            _pickerStateMotions.Clear();
+            foreach (KeyValuePair<string, string> choice in
+                     ParsePickerMotionSelections(_characterStateMotions.Value))
+            {
+                int characterId;
+                string stateName;
+                if (TryParsePickerMotionKey(choice.Key, out characterId, out stateName) &&
+                    availableIds.Contains(characterId))
+                {
+                    _pickerStateMotions[choice.Key] = choice.Value;
+                }
+            }
+            _pickerStateFaces.Clear();
+            foreach (KeyValuePair<string, MiniFaceSelection> choice in
+                     ParsePickerFaceSelections(_characterStateFaces.Value))
+            {
+                int characterId;
+                string stateName;
+                if (TryParsePickerMotionKey(choice.Key, out characterId, out stateName) &&
+                    availableIds.Contains(characterId))
+                {
+                    _pickerStateFaces[choice.Key] = choice.Value.Clone();
+                }
+            }
         }
 
         private void ResetPickerWindowRect()
         {
-            float width = Mathf.Min(640f, Mathf.Max(100f, Screen.width - 20f));
-            float height = Mathf.Min(720f, Mathf.Max(140f, Screen.height - 40f));
+            float maximumWidth = Mathf.Max(100f, Screen.width - 20f);
+            float maximumHeight = Mathf.Max(140f, Screen.height - 40f);
+            float width = _pickerWindowInitialized
+                ? _pickerWindowRect.width
+                : 640f;
+            float height = _pickerWindowInitialized
+                ? _pickerWindowRect.height
+                : 720f;
+            width = Mathf.Clamp(
+                width,
+                Mathf.Min(PickerMinimumWidth, maximumWidth),
+                maximumWidth);
+            height = Mathf.Clamp(
+                height,
+                Mathf.Min(PickerMinimumHeight, maximumHeight),
+                maximumHeight);
             _pickerWindowRect = new Rect(
                 Mathf.Max(10f, (Screen.width - width) * 0.5f),
                 Mathf.Max(30f, (Screen.height - height) * 0.5f),
                 width,
                 height);
+            _pickerWindowInitialized = true;
         }
 
         private void ClampPickerWindowRect()
         {
             float maxWidth = Mathf.Max(100f, Screen.width - 20f);
             float maxHeight = Mathf.Max(140f, Screen.height - 40f);
-            _pickerWindowRect.width = Mathf.Min(_pickerWindowRect.width, maxWidth);
-            _pickerWindowRect.height = Mathf.Min(_pickerWindowRect.height, maxHeight);
+            float minWidth = Mathf.Min(PickerMinimumWidth, maxWidth);
+            float minHeight = Mathf.Min(PickerMinimumHeight, maxHeight);
+            _pickerWindowRect.width = Mathf.Clamp(
+                _pickerWindowRect.width,
+                minWidth,
+                maxWidth);
+            _pickerWindowRect.height = Mathf.Clamp(
+                _pickerWindowRect.height,
+                minHeight,
+                maxHeight);
             _pickerWindowRect.x = Mathf.Clamp(
                 _pickerWindowRect.x,
                 0f,
@@ -343,12 +562,32 @@ namespace UmaPetForge
             if (_pickerCostumeCharacterId >= 0)
             {
                 DrawCostumePicker();
-                GUI.DragWindow(new Rect(0f, 0f, _pickerWindowRect.width, 24f));
+                FinishPickerWindow();
+                return;
+            }
+            if (_pickerMotionCharacterId >= 0)
+            {
+                bool pageEnabled = GUI.enabled;
+                GUI.enabled = pageEnabled && !IsPickerPreviewBusy();
+                if (!string.IsNullOrEmpty(_pickerFaceState))
+                {
+                    DrawMiniFacePicker();
+                }
+                else if (string.IsNullOrEmpty(_pickerMotionState))
+                {
+                    DrawStateAnimationsPicker();
+                }
+                else
+                {
+                    DrawMotionChoicePicker();
+                }
+                GUI.enabled = pageEnabled;
+                FinishPickerWindow();
                 return;
             }
 
             GUILayout.Space(4f);
-            GUILayout.Label("Choose the separate pets and clothes exported by F8.");
+            GUILayout.Label("Choose pets, clothes, animations, and Mini faces exported by F8.");
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("Search", GUILayout.Width(54f));
@@ -419,11 +658,22 @@ namespace UmaPetForge
                 }
                 if (next && GUILayout.Button(
                         GetPickerCostumeButtonLabel(character.Id),
-                        GUILayout.Width(250f)))
+                        GUILayout.Width(180f)))
                 {
                     _pickerCostumeCharacterId = character.Id;
                     _pickerCostumeSearch = string.Empty;
                     _pickerCostumeScroll = Vector2.zero;
+                }
+                if (next && GUILayout.Button(
+                        GetPickerAnimationsButtonLabel(character.Id),
+                        GUILayout.Width(190f)))
+                {
+                    _pickerMotionCharacterId = character.Id;
+                    _pickerMotionState = string.Empty;
+                    _pickerFaceState = string.Empty;
+                    _pickerStateScroll = Vector2.zero;
+                    _pickerMotionSearch = string.Empty;
+                    _pickerMotionScroll = Vector2.zero;
                 }
                 GUILayout.EndHorizontal();
             }
@@ -437,7 +687,8 @@ namespace UmaPetForge
             GUILayout.BeginHorizontal();
             if (GUILayout.Button("Cancel"))
             {
-                _pickerOpen = false;
+                RestorePickerFacePreview();
+                SetPickerOpen(false);
             }
 
             if (GUILayout.Button("Save"))
@@ -453,7 +704,66 @@ namespace UmaPetForge
             GUI.enabled = previousEnabled;
             GUILayout.EndHorizontal();
 
+            FinishPickerWindow();
+        }
+
+        private void FinishPickerWindow()
+        {
             GUI.DragWindow(new Rect(0f, 0f, _pickerWindowRect.width, 24f));
+            DrawPickerResizeHandle();
+        }
+
+        private void DrawPickerResizeHandle()
+        {
+            int controlId = GUIUtility.GetControlID(
+                GetInstanceID() ^ PickerResizeControlHint,
+                FocusType.Passive);
+            Rect handle = new Rect(
+                _pickerWindowRect.width - PickerResizeHandleSize - 4f,
+                _pickerWindowRect.height - PickerResizeHandleSize - 4f,
+                PickerResizeHandleSize,
+                PickerResizeHandleSize);
+            GUI.Box(handle, "↘");
+
+            Event current = Event.current;
+            switch (current.GetTypeForControl(controlId))
+            {
+                case EventType.MouseDown:
+                    if (current.button == 0 && handle.Contains(current.mousePosition))
+                    {
+                        GUIUtility.hotControl = controlId;
+                        _pickerResizeOffset = new Vector2(
+                            _pickerWindowRect.width - current.mousePosition.x,
+                            _pickerWindowRect.height - current.mousePosition.y);
+                        current.Use();
+                    }
+                    break;
+                case EventType.MouseDrag:
+                    if (GUIUtility.hotControl == controlId)
+                    {
+                        float maximumWidth = Mathf.Max(100f, Screen.width - 20f);
+                        float maximumHeight = Mathf.Max(140f, Screen.height - 40f);
+                        _pickerRequestedSize = new Vector2(
+                            Mathf.Clamp(
+                                current.mousePosition.x + _pickerResizeOffset.x,
+                                Mathf.Min(PickerMinimumWidth, maximumWidth),
+                                maximumWidth),
+                            Mathf.Clamp(
+                                current.mousePosition.y + _pickerResizeOffset.y,
+                                Mathf.Min(PickerMinimumHeight, maximumHeight),
+                                maximumHeight));
+                        _pickerResizePending = true;
+                        current.Use();
+                    }
+                    break;
+                case EventType.MouseUp:
+                    if (GUIUtility.hotControl == controlId)
+                    {
+                        GUIUtility.hotControl = 0;
+                        current.Use();
+                    }
+                    break;
+            }
         }
 
         private void DrawCostumePicker()
@@ -528,6 +838,1178 @@ namespace UmaPetForge
                 }
             }
             GUILayout.EndScrollView();
+        }
+
+        private void DrawStateAnimationsPicker()
+        {
+            CharaEntry character = _pickerCharacters.FirstOrDefault(
+                candidate => candidate.Id == _pickerMotionCharacterId);
+            if (character == null)
+            {
+                _pickerMotionCharacterId = -1;
+                _pickerMotionState = string.Empty;
+                return;
+            }
+
+            GUILayout.Space(4f);
+            if (GUILayout.Button("< Back to characters", GUILayout.Width(180f)))
+            {
+                RestorePickerFacePreview();
+                _pickerMotionCharacterId = -1;
+                _pickerMotionState = string.Empty;
+                _pickerFaceState = string.Empty;
+                return;
+            }
+
+            GUILayout.Label(
+                "Animations for " + character.Id.ToString(CultureInfo.InvariantCulture) +
+                "  " + character.GetName());
+            GUILayout.Label(
+                "Auto uses any advanced CSV override, then the current automatic default.");
+            DrawPickerPreviewStatus(character);
+
+            GUILayout.Space(8f);
+            float listHeight = Mathf.Max(120f, _pickerWindowRect.height - 215f);
+            _pickerStateScroll = GUILayout.BeginScrollView(
+                _pickerStateScroll,
+                GUI.skin.box,
+                GUILayout.Height(listHeight));
+            foreach (StateDefinition state in States)
+            {
+                string stateName = state.Name;
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(GetPickerStateDisplayName(stateName), GUILayout.Width(130f));
+                if (GUILayout.Button(
+                        "Motion: " + ShortenLabel(
+                            GetPickerMotionDisplayName(character.Id, stateName),
+                            28)))
+                {
+                    _pickerMotionState = stateName;
+                    _pickerFaceState = string.Empty;
+                    _pickerMotionSearch = string.Empty;
+                    _pickerMotionScroll = Vector2.zero;
+                }
+                if (GUILayout.Button(
+                        "Face: " + GetPickerFaceDisplayName(character.Id, stateName),
+                        GUILayout.Width(150f)))
+                {
+                    BeginPickerFaceEdit(character.Id, stateName);
+                }
+                GUILayout.EndHorizontal();
+            }
+            GUILayout.EndScrollView();
+
+            if (!string.IsNullOrEmpty(_pickerStatus))
+            {
+                GUILayout.Label(_pickerStatus);
+            }
+
+            GUILayout.Label(
+                "Tip: idle pins all dances, hover pins near05, and Character labels are that Uma's special clips.");
+        }
+
+        private void DrawMotionChoicePicker()
+        {
+            CharaEntry character = _pickerCharacters.FirstOrDefault(
+                candidate => candidate.Id == _pickerMotionCharacterId);
+            StateDefinition state = GetPickerStateDefinition(_pickerMotionState);
+            if (character == null || state == null)
+            {
+                _pickerMotionCharacterId = -1;
+                _pickerMotionState = string.Empty;
+                return;
+            }
+
+            GUILayout.Space(4f);
+            if (GUILayout.Button("< Back to animations", GUILayout.Width(180f)))
+            {
+                _pickerMotionState = string.Empty;
+                _pickerMotionSearch = string.Empty;
+                return;
+            }
+
+            GUILayout.Label(
+                GetPickerStateDisplayName(state.Name) + " motion for " + character.GetName());
+            GUILayout.Label("Current: " + GetPickerMotionDisplayName(character.Id, state.Name));
+            DrawPickerPreviewStatus(character);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Search", GUILayout.Width(54f));
+            _pickerMotionSearch = GUILayout.TextField(_pickerMotionSearch ?? string.Empty);
+            if (GUILayout.Button("X", GUILayout.Width(30f)))
+            {
+                _pickerMotionSearch = string.Empty;
+                _pickerMotionScroll = Vector2.zero;
+            }
+            GUILayout.EndHorizontal();
+
+            List<UmaDatabaseEntry> compatible = GetCompatibleMotions(
+                _pickerMiniMotions,
+                character.Id);
+            string query = (_pickerMotionSearch ?? string.Empty).Trim();
+            string selectionKey = MotionOverrideKey(
+                character.Id.ToString(CultureInfo.InvariantCulture),
+                state.Name);
+            string selectedMotion;
+            _pickerStateMotions.TryGetValue(selectionKey, out selectedMotion);
+
+            List<UmaDatabaseEntry> visible;
+            if (string.IsNullOrEmpty(query))
+            {
+                visible = BuildPickerRecommendedMotions(
+                    compatible,
+                    state,
+                    character.Id,
+                    selectedMotion);
+                GUILayout.Label(
+                    GetPickerRecommendationLabel(state, character) +
+                    " — search to browse all " + compatible.Count + " compatible motions");
+            }
+            else
+            {
+                List<UmaDatabaseEntry> matches = compatible
+                    .Where(entry => MotionMatchesPickerSearch(entry, query))
+                    .OrderBy(entry => entry.Name, StringComparer.Ordinal)
+                    .ToList();
+                visible = matches.Take(160).ToList();
+                GUILayout.Label(
+                    "Showing " + visible.Count + " / " + matches.Count +
+                    " matches" + (matches.Count > visible.Count ? " — refine search for more" : ""));
+            }
+
+            float listHeight = Mathf.Max(80f, _pickerWindowRect.height - 225f);
+            _pickerMotionScroll = GUILayout.BeginScrollView(
+                _pickerMotionScroll,
+                GUI.skin.box,
+                GUILayout.Height(listHeight));
+
+            bool isAuto = string.IsNullOrEmpty(selectedMotion);
+            if (GUILayout.Button((isAuto ? "[Selected] " : "") + "Auto / advanced CSV fallback"))
+            {
+                _pickerStateMotions.Remove(selectionKey);
+                _pickerStatus = character.GetName() + " " + state.Name + " motion set to Auto.";
+                _pickerMotionState = string.Empty;
+            }
+            foreach (UmaDatabaseEntry entry in visible)
+            {
+                string motionKey = entry.Key.ToString(CultureInfo.InvariantCulture);
+                bool selected = string.Equals(
+                    selectedMotion,
+                    motionKey,
+                    StringComparison.Ordinal);
+                string label = (selected ? "[Selected] " : "") +
+                    ShortenLabel(GetFriendlyMotionName(entry), 72);
+                if (GUILayout.Button(label))
+                {
+                    _pickerStateMotions[selectionKey] = motionKey;
+                    _pickerStatus = character.GetName() + " " + state.Name +
+                        " motion: " + GetFriendlyMotionName(entry) + ".";
+                    PreviewOrQueuePickerMotion(character, entry);
+                }
+            }
+            GUILayout.EndScrollView();
+        }
+
+        private void BeginPickerFaceEdit(int characterId, string stateName)
+        {
+            RestorePickerFacePreview();
+            _pickerMotionState = string.Empty;
+            _pickerFaceState = stateName;
+            string selectionKey = MotionOverrideKey(
+                characterId.ToString(CultureInfo.InvariantCulture),
+                stateName);
+            MiniFaceSelection configured;
+            if (_pickerStateFaces.TryGetValue(selectionKey, out configured))
+            {
+                _pickerFaceDraft = configured.Clone();
+            }
+            else
+            {
+                _pickerFaceDraft = null;
+            }
+
+            CharaEntry character = _pickerCharacters.FirstOrDefault(
+                candidate => candidate.Id == characterId);
+            if (character != null && IsMatchingPickerPreview(character))
+            {
+                EnsurePickerFacePreview(characterId);
+                InitializePickerFaceDraftFromPreview();
+                ApplyPickerFacePreview();
+                return;
+            }
+
+            QueuePickerPreview(character, null);
+        }
+
+        private void DrawMiniFacePicker()
+        {
+            CharaEntry character = _pickerCharacters.FirstOrDefault(
+                candidate => candidate.Id == _pickerMotionCharacterId);
+            StateDefinition state = GetPickerStateDefinition(_pickerFaceState);
+            if (character == null || state == null)
+            {
+                RestorePickerFacePreview();
+                _pickerMotionCharacterId = -1;
+                _pickerFaceState = string.Empty;
+                return;
+            }
+
+            RefreshActivePickerFacePreview(character);
+
+            GUILayout.Space(4f);
+            if (GUILayout.Button("< Back to animations", GUILayout.Width(180f)))
+            {
+                RestorePickerFacePreview();
+                _pickerFaceState = string.Empty;
+                _pickerFaceDraft = null;
+                return;
+            }
+
+            GUILayout.Label(
+                GetPickerStateDisplayName(state.Name) + " face for " + character.GetName());
+            GUILayout.Label(
+                "Auto keeps the default face. Custom uses Mini texture slots for this state.");
+            DrawPickerPreviewStatus(character, true);
+
+            string selectionKey = MotionOverrideKey(
+                character.Id.ToString(CultureInfo.InvariantCulture),
+                state.Name);
+            bool isAuto = !_pickerStateFaces.ContainsKey(selectionKey);
+            if (GUILayout.Button((isAuto ? "[Selected] " : "") + "Auto / default face"))
+            {
+                _pickerStateFaces.Remove(selectionKey);
+                RestorePickerFacePreview();
+                _pickerStatus = character.GetName() + " " + state.Name + " face set to Auto.";
+                _pickerFaceState = string.Empty;
+                _pickerFaceDraft = null;
+                return;
+            }
+
+            GUILayout.Space(8f);
+            bool faceReady = _pickerFacePreviewMaterials != null && _pickerFaceDraft != null;
+            if (faceReady)
+            {
+                bool changed = false;
+                int nextValue = DrawMiniFaceIndex(
+                    "Left eye",
+                    _pickerFaceDraft.EyeLeft,
+                    MiniFaceSelection.EyeMinimum,
+                    MiniFaceSelection.EyeMaximum);
+                if (nextValue != _pickerFaceDraft.EyeLeft)
+                {
+                    _pickerFaceDraft.EyeLeft = nextValue;
+                    changed = true;
+                }
+                nextValue = DrawMiniFaceIndex(
+                    "Right eye",
+                    _pickerFaceDraft.EyeRight,
+                    MiniFaceSelection.EyeMinimum,
+                    MiniFaceSelection.EyeMaximum);
+                if (nextValue != _pickerFaceDraft.EyeRight)
+                {
+                    _pickerFaceDraft.EyeRight = nextValue;
+                    changed = true;
+                }
+                nextValue = DrawMiniFaceIndex(
+                    "Mouth",
+                    _pickerFaceDraft.Mouth,
+                    MiniFaceSelection.MouthMinimum,
+                    MiniFaceSelection.MouthMaximum);
+                if (nextValue != _pickerFaceDraft.Mouth)
+                {
+                    _pickerFaceDraft.Mouth = nextValue;
+                    changed = true;
+                }
+                nextValue = DrawMiniFaceIndex(
+                    "Left eyebrow",
+                    _pickerFaceDraft.EyebrowLeft,
+                    MiniFaceSelection.EyebrowMinimum,
+                    MiniFaceSelection.EyebrowMaximum);
+                if (nextValue != _pickerFaceDraft.EyebrowLeft)
+                {
+                    _pickerFaceDraft.EyebrowLeft = nextValue;
+                    changed = true;
+                }
+                nextValue = DrawMiniFaceIndex(
+                    "Right eyebrow",
+                    _pickerFaceDraft.EyebrowRight,
+                    MiniFaceSelection.EyebrowMinimum,
+                    MiniFaceSelection.EyebrowMaximum);
+                if (nextValue != _pickerFaceDraft.EyebrowRight)
+                {
+                    _pickerFaceDraft.EyebrowRight = nextValue;
+                    changed = true;
+                }
+
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("Match eyes"))
+                {
+                    _pickerFaceDraft.EyeRight = _pickerFaceDraft.EyeLeft;
+                    changed = true;
+                }
+                if (GUILayout.Button("Match eyebrows"))
+                {
+                    _pickerFaceDraft.EyebrowRight = _pickerFaceDraft.EyebrowLeft;
+                    changed = true;
+                }
+                GUILayout.EndHorizontal();
+
+                if (changed || _pickerFacePreviewMaterials != null)
+                {
+                    ApplyPickerFacePreview();
+                }
+
+                GUILayout.Label("Face changes are previewing live on the loaded Mini.");
+            }
+            else if (IsPickerPreviewBusy())
+            {
+                GUILayout.Label("Face controls unlock as soon as the Mini preview finishes loading.");
+            }
+            else
+            {
+                GUILayout.Label("Face preview is unavailable. Use Retry preview above.");
+            }
+
+            GUILayout.FlexibleSpace();
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Cancel"))
+            {
+                RestorePickerFacePreview();
+                _pickerFaceState = string.Empty;
+                _pickerFaceDraft = null;
+            }
+            bool previousEnabled = GUI.enabled;
+            GUI.enabled = previousEnabled && faceReady;
+            if (GUILayout.Button("Save custom face"))
+            {
+                _pickerStateFaces[selectionKey] = _pickerFaceDraft.ClampedClone();
+                ApplyPickerFacePreview();
+                RestorePickerFacePreview();
+                _pickerStatus = character.GetName() + " " + state.Name + " face saved.";
+                _pickerFaceState = string.Empty;
+                _pickerFaceDraft = null;
+            }
+            GUI.enabled = previousEnabled;
+            GUILayout.EndHorizontal();
+        }
+
+        private static int DrawMiniFaceIndex(
+            string label,
+            int value,
+            int minimum,
+            int maximum)
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(label, GUILayout.Width(140f));
+            if (GUILayout.Button("-", GUILayout.Width(44f)))
+            {
+                value = Mathf.Max(minimum, value - 1);
+            }
+            GUILayout.Label(
+                value.ToString(CultureInfo.InvariantCulture) +
+                " / " + maximum.ToString(CultureInfo.InvariantCulture),
+                GUILayout.Width(90f));
+            if (GUILayout.Button("+", GUILayout.Width(44f)))
+            {
+                value = Mathf.Min(maximum, value + 1);
+            }
+            GUILayout.EndHorizontal();
+            return value;
+        }
+
+        private void EnsurePickerFacePreview(int characterId)
+        {
+            UmaContainerCharacter container = UmaViewerBuilder.Instance == null
+                ? null
+                : UmaViewerBuilder.Instance.CurrentUMAContainer;
+            if (ReferenceEquals(container, _pickerFacePreviewContainer) &&
+                _pickerFacePreviewMaterials != null)
+            {
+                return;
+            }
+            if (ReferenceEquals(container, _pickerFacePreviewAttemptContainer) &&
+                _pickerFacePreviewMaterials == null)
+            {
+                return;
+            }
+
+            RestorePickerFacePreview();
+            if (container == null ||
+                !container.IsMini ||
+                container.CharaEntry == null ||
+                container.CharaEntry.Id != characterId)
+            {
+                return;
+            }
+
+            _pickerFacePreviewAttemptContainer = container;
+
+            MiniFaceMaterials materials;
+            string error;
+            if (MiniFaceMaterials.TryCapture(container, out materials, out error))
+            {
+                _pickerFacePreviewContainer = container;
+                _pickerFacePreviewMaterials = materials;
+                _pickerPreviewError = string.Empty;
+            }
+            else
+            {
+                Logger.LogWarning(error);
+                _pickerStatus = error;
+                _pickerPreviewError = error;
+            }
+        }
+
+        private void RefreshActivePickerFacePreview(CharaEntry character)
+        {
+            if (character == null || !IsMatchingPickerPreview(character))
+            {
+                RestorePickerFacePreview();
+                return;
+            }
+
+            if (_pickerFacePreviewMaterials == null)
+            {
+                EnsurePickerFacePreview(character.Id);
+                InitializePickerFaceDraftFromPreview();
+                ApplyPickerFacePreview();
+                return;
+            }
+
+            UmaContainerCharacter current = UmaViewerBuilder.Instance == null
+                ? null
+                : UmaViewerBuilder.Instance.CurrentUMAContainer;
+            if (ReferenceEquals(current, _pickerFacePreviewContainer))
+            {
+                return;
+            }
+
+            RestorePickerFacePreview();
+            EnsurePickerFacePreview(character.Id);
+            InitializePickerFaceDraftFromPreview();
+            ApplyPickerFacePreview();
+        }
+
+        private void InitializePickerFaceDraftFromPreview()
+        {
+            if (_pickerFaceDraft != null || _pickerFacePreviewMaterials == null)
+            {
+                return;
+            }
+
+            MiniFaceSelection current;
+            string error;
+            if (_pickerFacePreviewMaterials.TryReadCurrent(out current, out error))
+            {
+                _pickerFaceDraft = current;
+                return;
+            }
+
+            Logger.LogWarning(error);
+            _pickerStatus = error;
+            _pickerPreviewError = error;
+            RestorePickerFacePreview();
+        }
+
+        private void ApplyPickerFacePreview()
+        {
+            if (_pickerFacePreviewMaterials == null || _pickerFaceDraft == null)
+            {
+                return;
+            }
+
+            string error;
+            if (!_pickerFacePreviewMaterials.TryApply(_pickerFaceDraft, out error))
+            {
+                Logger.LogWarning(error);
+                _pickerStatus = error;
+                _pickerPreviewError = error;
+                RestorePickerFacePreview();
+            }
+        }
+
+        private void RestorePickerFacePreview()
+        {
+            try
+            {
+                if (_pickerFacePreviewMaterials != null)
+                {
+                    _pickerFacePreviewMaterials.RestoreBaseline();
+                }
+            }
+            catch (Exception exception)
+            {
+                Logger.LogDebug("Could not restore Mini face preview: " + exception.Message);
+            }
+            finally
+            {
+                _pickerFacePreviewMaterials = null;
+                _pickerFacePreviewContainer = null;
+                _pickerFacePreviewAttemptContainer = null;
+            }
+        }
+
+        private bool IsPickerPreviewBusy()
+        {
+            return _pickerPreviewRequested || _pickerPreviewLoading;
+        }
+
+        private bool IsMatchingPickerPreview(CharaEntry character)
+        {
+            if (character == null)
+            {
+                return false;
+            }
+
+            string costumeId;
+            try
+            {
+                costumeId = ResolvePickerPreviewCostume(character.Id);
+            }
+            catch
+            {
+                return false;
+            }
+            return IsMatchingMiniPreview(character.Id, costumeId);
+        }
+
+        private static bool IsMatchingMiniPreview(
+            int characterId,
+            string costumeId)
+        {
+            UmaContainerCharacter container = UmaViewerBuilder.Instance == null
+                ? null
+                : UmaViewerBuilder.Instance.CurrentUMAContainer;
+            if (container == null ||
+                !container.IsMini ||
+                container.CharaEntry == null ||
+                container.CharaEntry.Id != characterId ||
+                container.UmaAnimator == null ||
+                container.gameObject == null)
+            {
+                return false;
+            }
+
+            string prefix = "Chara_" +
+                characterId.ToString(CultureInfo.InvariantCulture) + "_";
+            string objectName = container.gameObject.name ?? string.Empty;
+            return objectName.StartsWith(prefix, StringComparison.Ordinal) &&
+                   string.Equals(
+                       objectName.Substring(prefix.Length),
+                       costumeId,
+                       StringComparison.Ordinal);
+        }
+
+        private void DrawPickerPreviewStatus(
+            CharaEntry character,
+            bool requireFacePreview = false)
+        {
+            bool matching = IsMatchingPickerPreview(character);
+            GUILayout.BeginHorizontal();
+            if (IsPickerPreviewBusy())
+            {
+                GUILayout.Label(
+                    "Loading " + character.GetName() + " Mini for live preview...");
+                GUILayout.Button("Loading...", GUILayout.Width(190f));
+            }
+            else if (!string.IsNullOrEmpty(_pickerPreviewError) &&
+                     (!matching || requireFacePreview))
+            {
+                GUILayout.Label("Preview failed: " + ShortenLabel(_pickerPreviewError, 64));
+                if (GUILayout.Button("Retry preview", GUILayout.Width(190f)))
+                {
+                    QueuePickerPreview(character, null);
+                }
+            }
+            else if (matching)
+            {
+                GUILayout.Label(
+                    "Live preview ready: " + character.GetName() +
+                    " Mini — drag this window aside to watch");
+                if (GUILayout.Button("Reload selected clothes", GUILayout.Width(190f)))
+                {
+                    QueuePickerPreview(character, null);
+                }
+            }
+            else
+            {
+                GUILayout.Label("Live preview model is not loaded.");
+                if (GUILayout.Button("Load Mini for preview", GUILayout.Width(190f)))
+                {
+                    QueuePickerPreview(character, null);
+                }
+            }
+            GUILayout.EndHorizontal();
+        }
+
+        private void PreviewOrQueuePickerMotion(
+            CharaEntry character,
+            UmaDatabaseEntry motion)
+        {
+            if (IsMatchingPickerPreview(character))
+            {
+                PreviewPickerMotion(character.Id, motion);
+                return;
+            }
+
+            QueuePickerPreview(character, motion);
+        }
+
+        private void QueuePickerPreview(
+            CharaEntry character,
+            UmaDatabaseEntry motion)
+        {
+            if (character == null || IsPickerPreviewBusy())
+            {
+                return;
+            }
+
+            try
+            {
+                _pickerPreviewCharacterId = character.Id;
+                _pickerPreviewCostumeId = ResolvePickerPreviewCostume(character.Id);
+                _pickerPreviewMotion = motion;
+                _pickerPreviewError = string.Empty;
+                _pickerPreviewRequested = true;
+                _pickerStatus = "Loading " + character.GetName() +
+                    " Mini for live preview...";
+            }
+            catch (Exception exception)
+            {
+                _pickerPreviewError = exception.Message;
+                _pickerStatus = "Preview failed: " + exception.Message;
+                Logger.LogWarning(_pickerStatus);
+            }
+        }
+
+        private IEnumerator LoadPickerPreview(
+            int characterId,
+            string costumeId,
+            UmaDatabaseEntry motion)
+        {
+            yield return null;
+
+            IEnumerator routine = LoadPickerPreviewCore(
+                characterId,
+                costumeId,
+                motion);
+            Exception failure = null;
+            while (true)
+            {
+                bool moved;
+                object current = null;
+                try
+                {
+                    moved = routine.MoveNext();
+                    if (moved)
+                    {
+                        current = routine.Current;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    failure = exception;
+                    break;
+                }
+
+                if (!moved)
+                {
+                    break;
+                }
+
+                yield return current;
+            }
+
+            _pickerPreviewLoading = false;
+            _pickerPreviewMotion = null;
+            if (failure == null)
+            {
+                _pickerPreviewError = string.Empty;
+                yield break;
+            }
+
+            _pickerPreviewError = failure.Message;
+            _pickerStatus = "Preview failed: " + failure.Message;
+            Logger.LogError("UmaPetForge Mini preview failed: " + failure);
+            ShowViewerMessage("UmaPetForge preview failed — retry in F6", UIMessageType.Error);
+        }
+
+        private IEnumerator LoadPickerPreviewCore(
+            int characterId,
+            string costumeId,
+            UmaDatabaseEntry motion)
+        {
+            CharaEntry character = _pickerCharacters.FirstOrDefault(
+                candidate => candidate.Id == characterId);
+            if (character == null)
+            {
+                throw new InvalidOperationException(
+                    "The selected character is no longer available in UmaViewer.");
+            }
+
+            float assetLoadDeadline = Time.realtimeSinceStartup + 30f;
+            while (UmaAssetManager.LoadCoroutine != null)
+            {
+                if (Time.realtimeSinceStartup >= assetLoadDeadline)
+                {
+                    throw new InvalidOperationException(
+                        "UmaViewer was still loading other assets after 30 seconds.");
+                }
+                yield return null;
+            }
+
+            UmaViewerBuilder builder = UmaViewerBuilder.Instance;
+            if (builder == null)
+            {
+                throw new InvalidOperationException("UmaViewer's character builder is unavailable.");
+            }
+
+            RestorePickerFacePreview();
+            builder.UnloadUma();
+            yield return null;
+
+            assetLoadDeadline = Time.realtimeSinceStartup + 30f;
+            while (UmaAssetManager.LoadCoroutine != null)
+            {
+                if (Time.realtimeSinceStartup >= assetLoadDeadline)
+                {
+                    throw new InvalidOperationException(
+                        "UmaViewer started another asset load and did not finish within 30 seconds.");
+                }
+                yield return null;
+            }
+
+            IEnumerator loadRoutine = builder.LoadUma(character, costumeId, true);
+            while (loadRoutine.MoveNext())
+            {
+                yield return loadRoutine.Current;
+            }
+            yield return new WaitForEndOfFrame();
+
+            UmaContainerCharacter container = builder.CurrentUMAContainer;
+            if (container == null ||
+                !container.IsMini ||
+                container.CharaEntry == null ||
+                container.CharaEntry.Id != characterId ||
+                container.UmaAnimator == null)
+            {
+                throw new InvalidOperationException(
+                    "UmaViewer did not create a usable matching Mini model.");
+            }
+            if (!IsMatchingMiniPreview(characterId, costumeId))
+            {
+                throw new InvalidOperationException(
+                    "UmaViewer loaded the character with different clothes than the F6 selection.");
+            }
+
+            if (motion != null)
+            {
+                container.LoadAnimation(motion);
+            }
+
+            if (_pickerOpen &&
+                _pickerMotionCharacterId == characterId &&
+                !string.IsNullOrEmpty(_pickerFaceState))
+            {
+                EnsurePickerFacePreview(characterId);
+                InitializePickerFaceDraftFromPreview();
+                ApplyPickerFacePreview();
+                if (_pickerFacePreviewMaterials == null || _pickerFaceDraft == null)
+                {
+                    throw new InvalidOperationException(
+                        string.IsNullOrEmpty(_pickerPreviewError)
+                            ? "The Mini loaded, but its live face materials were unavailable."
+                            : _pickerPreviewError);
+                }
+            }
+
+            _pickerStatus = "Live preview ready: " + character.GetName() +
+                " Mini" + (motion == null
+                    ? "."
+                    : " — " + GetFriendlyMotionName(motion) + ".");
+            ShowViewerMessage("UmaPetForge Mini preview ready", UIMessageType.Success);
+        }
+
+        private string ResolvePickerPreviewCostume(int characterId)
+        {
+            List<MiniCostumeOption> options;
+            if (!_miniCostumeOptions.TryGetValue(characterId, out options) ||
+                options.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "No usable Mini clothes were found for this character.");
+            }
+
+            string selected;
+            if (_pickerCostumes.TryGetValue(characterId, out selected) &&
+                options.Any(option =>
+                    string.Equals(option.Id, selected, StringComparison.Ordinal)))
+            {
+                return selected;
+            }
+
+            MiniCostumeOption automatic = options.FirstOrDefault(option => option.Id == "00") ??
+                options.FirstOrDefault(option => option.Id.Length < 4) ??
+                options.FirstOrDefault();
+            if (automatic == null)
+            {
+                throw new InvalidOperationException(
+                    "No usable Mini clothes were found for this character.");
+            }
+            return automatic.Id;
+        }
+
+        private string GetPickerFaceDisplayName(int characterId, string stateName)
+        {
+            string selectionKey = MotionOverrideKey(
+                characterId.ToString(CultureInfo.InvariantCulture),
+                stateName);
+            MiniFaceSelection selection;
+            return _pickerStateFaces.TryGetValue(selectionKey, out selection)
+                ? "Custom"
+                : "Auto";
+        }
+
+        private string GetPickerAnimationsButtonLabel(int characterId)
+        {
+            string prefix = characterId.ToString(CultureInfo.InvariantCulture) + ":";
+            int customCount =
+                _pickerStateMotions.Keys.Count(key =>
+                    key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) +
+                _pickerStateFaces.Keys.Count(key =>
+                    key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+            return customCount == 0
+                ? "Animations/Face: Auto"
+                : "Animations/Face: " + customCount;
+        }
+
+        private string GetPickerMotionDisplayName(int characterId, string stateName)
+        {
+            string selectionKey = MotionOverrideKey(
+                characterId.ToString(CultureInfo.InvariantCulture),
+                stateName);
+            string configured;
+            if (!_pickerStateMotions.TryGetValue(selectionKey, out configured))
+            {
+                return "Auto";
+            }
+
+            UmaDatabaseEntry entry = ResolveConfiguredMotion(
+                configured,
+                GetCompatibleMotions(_pickerMiniMotions, characterId));
+            return entry == null
+                ? "Unavailable [" + configured + "]"
+                : GetFriendlyMotionName(entry);
+        }
+
+        private void PreviewPickerMotion(int characterId, UmaDatabaseEntry entry)
+        {
+            UmaContainerCharacter container = UmaViewerBuilder.Instance == null
+                ? null
+                : UmaViewerBuilder.Instance.CurrentUMAContainer;
+            if (container == null ||
+                !container.IsMini ||
+                container.CharaEntry == null ||
+                container.CharaEntry.Id != characterId)
+            {
+                _pickerStatus += " Load the same character under Characters > Mini for live preview.";
+                return;
+            }
+
+            try
+            {
+                container.LoadAnimation(entry);
+                _pickerStatus += " Previewing on the loaded Mini.";
+            }
+            catch (Exception exception)
+            {
+                Logger.LogWarning("Could not preview picker motion: " + exception.Message);
+                _pickerStatus += " Preview failed; the saved choice can still be exported.";
+            }
+        }
+
+        private static string GetFriendlyMotionName(UmaDatabaseEntry entry)
+        {
+            string motionName = entry == null ? string.Empty : entry.Name;
+            string fileName = Path.GetFileName(motionName) ?? string.Empty;
+            string lower = fileName.ToLowerInvariant();
+            string[] keywords =
+            {
+                "dance", "near", "run", "walk", "jump", "hop", "idle", "stand",
+                "happy", "joy", "wave", "clap", "pose", "wait", "work",
+                "study", "read", "look", "fail", "sad", "res", "mot",
+                "act", "pdk", "kanban"
+            };
+            string[] labels =
+            {
+                "Dance", "Near", "Run", "Walk", "Jump", "Hop", "Idle", "Stand",
+                "Happy", "Joy", "Wave", "Clap", "Pose", "Wait", "Work",
+                "Study", "Read", "Look", "Failure", "Sad", "Special", "Special",
+                "Special", "Special", "Sign pose"
+            };
+
+            for (int index = 0; index < keywords.Length; index++)
+            {
+                int marker = lower.IndexOf(keywords[index], StringComparison.Ordinal);
+                if (marker < 0)
+                {
+                    continue;
+                }
+
+                int numberStart = marker + keywords[index].Length;
+                int numberEnd = numberStart;
+                while (numberEnd < lower.Length && char.IsDigit(lower[numberEnd]))
+                {
+                    numberEnd++;
+                }
+                string number = numberEnd > numberStart
+                    ? " " + lower.Substring(numberStart, numberEnd - numberStart)
+                    : string.Empty;
+                string variant = GetCharacterMotionVariant(motionName);
+                string loop = lower.Contains("loop") ? " (Loop)" : string.Empty;
+                string scope = IsCharacterSpecificMotion(motionName)
+                    ? " - Character"
+                    : " - General";
+                return labels[index] + number + variant + loop + scope;
+            }
+
+            string cleaned = lower
+                .Replace("anm_min_", string.Empty)
+                .Replace("anm_", string.Empty)
+                .Replace("eve_", string.Empty)
+                .Replace("type00_", string.Empty)
+                .Replace("_loop", " (loop)")
+                .Replace('_', ' ')
+                .Trim();
+            string fallback = string.IsNullOrEmpty(cleaned)
+                ? "Unnamed motion"
+                : CultureInfo.InvariantCulture.TextInfo.ToTitleCase(cleaned);
+            return fallback + (IsCharacterSpecificMotion(motionName)
+                ? " - Character"
+                : " - General");
+        }
+
+        private static string GetCharacterMotionVariant(string motionName)
+        {
+            int characterId;
+            if (!TryGetMotionCharacterId(motionName, out characterId))
+            {
+                return string.Empty;
+            }
+
+            string fileName = Path.GetFileName(motionName ?? string.Empty) ?? string.Empty;
+            string marker = "chr" + characterId.ToString(CultureInfo.InvariantCulture) + "_";
+            int markerIndex = fileName.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (markerIndex < 0)
+            {
+                return string.Empty;
+            }
+
+            int start = markerIndex + marker.Length;
+            int end = start;
+            while (end < fileName.Length && char.IsDigit(fileName[end]))
+            {
+                end++;
+            }
+            if (end == start || end - start > 2)
+            {
+                return string.Empty;
+            }
+
+            string variant = fileName.Substring(start, end - start);
+            return string.Equals(variant, "00", StringComparison.Ordinal)
+                ? string.Empty
+                : " (Variant " + variant + ")";
+        }
+
+        private static StateDefinition GetPickerStateDefinition(string stateName)
+        {
+            return States.FirstOrDefault(state =>
+                string.Equals(state.Name, stateName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string GetPickerStateDisplayName(string stateName)
+        {
+            switch (stateName)
+            {
+                case "idle":
+                    return "Idle / resting";
+                case "run_right":
+                    return "Move right";
+                case "run_left":
+                    return "Move left";
+                case "wave":
+                    return "Wave / greeting";
+                case "jump":
+                    return "Cursor hover / jump";
+                case "failure":
+                    return "Failure / error";
+                case "waiting":
+                    return "Waiting";
+                case "working":
+                    return "Working";
+                case "review":
+                    return "Review";
+                default:
+                    return stateName;
+            }
+        }
+
+        private static int GetPickerRecommendationPriority(
+            StateDefinition state,
+            UmaDatabaseEntry entry,
+            int characterId)
+        {
+            string fileName = Path.GetFileName(entry.Name ?? string.Empty) ?? string.Empty;
+            string lower = fileName.ToLowerInvariant();
+            if (state.Name == "idle" && lower.Contains("dance"))
+            {
+                return 4;
+            }
+            if (state.Name == "jump" && lower.Contains("near05"))
+            {
+                return 4;
+            }
+            if (MotionMatchesCharacter(entry.Name, characterId))
+            {
+                return 3;
+            }
+            return ContainsAnyKeyword(state, entry.Name) ? 2 : 0;
+        }
+
+        private static List<UmaDatabaseEntry> BuildPickerRecommendedMotions(
+            IEnumerable<UmaDatabaseEntry> compatible,
+            StateDefinition state,
+            int characterId,
+            string selectedMotion)
+        {
+            List<UmaDatabaseEntry> candidates = compatible.ToList();
+            List<UmaDatabaseEntry> pinned = candidates
+                .Where(entry =>
+                    MotionEntryMatchesConfigured(entry, selectedMotion) ||
+                    GetPickerRecommendationPriority(state, entry, characterId) >= 3)
+                .OrderByDescending(entry =>
+                    MotionEntryMatchesConfigured(entry, selectedMotion))
+                .ThenByDescending(entry =>
+                    GetPickerRecommendationPriority(state, entry, characterId))
+                .ThenByDescending(entry => ScoreMotion(state, entry.Name, characterId))
+                .ThenBy(entry => entry.Name, StringComparer.Ordinal)
+                .ToList();
+
+            var visible = new List<UmaDatabaseEntry>();
+            var seen = new HashSet<long>();
+            foreach (UmaDatabaseEntry entry in pinned)
+            {
+                if (seen.Add(entry.Key))
+                {
+                    visible.Add(entry);
+                }
+            }
+
+            int targetCount = Math.Max(80, visible.Count);
+            foreach (UmaDatabaseEntry entry in candidates
+                         .Where(candidate =>
+                             GetPickerRecommendationPriority(
+                                 state,
+                                 candidate,
+                                 characterId) == 2)
+                         .OrderByDescending(candidate =>
+                             ScoreMotion(state, candidate.Name, characterId))
+                         .ThenBy(candidate => candidate.Name, StringComparer.Ordinal))
+            {
+                if (visible.Count >= targetCount)
+                {
+                    break;
+                }
+                if (seen.Add(entry.Key))
+                {
+                    visible.Add(entry);
+                }
+            }
+
+            if (visible.Count > 0)
+            {
+                return visible;
+            }
+            return candidates.Take(80).ToList();
+        }
+
+        private static string GetPickerRecommendationLabel(
+            StateDefinition state,
+            CharaEntry character)
+        {
+            string characterName = character == null
+                ? "character"
+                : character.GetName();
+            if (state.Name == "idle")
+            {
+                return "Recommended: all dances, " + characterName +
+                    " specials, and idle motions";
+            }
+            if (state.Name == "jump")
+            {
+                return "Recommended: near05, " + characterName +
+                    " specials, and jump motions";
+            }
+            if (state.Name == "run_right" || state.Name == "run_left")
+            {
+                return "Recommended: " + characterName +
+                    " specials and run/walk motions";
+            }
+            if (state.Name == "wave")
+            {
+                return "Recommended: " + characterName +
+                    " specials and greeting/wave motions";
+            }
+            if (state.Name == "failure")
+            {
+                return "Recommended: " + characterName +
+                    " specials and failure/sad motions";
+            }
+            if (state.Name == "waiting")
+            {
+                return "Recommended: " + characterName +
+                    " specials and waiting/standing motions";
+            }
+            if (state.Name == "working")
+            {
+                return "Recommended: " + characterName +
+                    " specials and work/study motions";
+            }
+            if (state.Name == "review")
+            {
+                return "Recommended: " + characterName +
+                    " specials and review/look/read motions";
+            }
+            return "Recommended: " + characterName +
+                " character specials and matching motions";
+        }
+
+        private static bool MotionMatchesPickerSearch(UmaDatabaseEntry entry, string query)
+        {
+            string key = entry.Key.ToString(CultureInfo.InvariantCulture);
+            string path = entry.Name ?? string.Empty;
+            return path.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   Path.GetFileName(path).IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   GetFriendlyMotionName(entry)
+                       .IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   key.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool MotionEntryMatchesConfigured(
+            UmaDatabaseEntry entry,
+            string configured)
+        {
+            if (string.IsNullOrEmpty(configured))
+            {
+                return false;
+            }
+
+            return string.Equals(
+                       entry.Key.ToString(CultureInfo.InvariantCulture),
+                       configured,
+                       StringComparison.Ordinal) ||
+                   string.Equals(entry.Name, configured, StringComparison.OrdinalIgnoreCase);
         }
 
         private string GetPickerCostumeButtonLabel(int characterId)
@@ -611,6 +2093,83 @@ namespace UmaPetForge
                 }
             }
             _characterCostumes.Value = string.Join(";", savedCostumes.ToArray());
+
+            var savedMotions = new List<string>();
+            foreach (KeyValuePair<string, string> choice in _pickerStateMotions
+                         .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                int characterId;
+                string stateName;
+                CharaEntry character;
+                UmaDatabaseEntry motion = null;
+                if (TryParsePickerMotionKey(choice.Key, out characterId, out stateName))
+                {
+                    character = _pickerCharacters.FirstOrDefault(candidate =>
+                        candidate.Id == characterId);
+                    if (character != null)
+                    {
+                        motion = ResolveConfiguredMotion(
+                            choice.Value,
+                            GetCompatibleMotions(_pickerMiniMotions, characterId));
+                    }
+                }
+
+                if (motion != null)
+                {
+                    savedMotions.Add(
+                        MotionOverrideKey(
+                            characterId.ToString(CultureInfo.InvariantCulture),
+                            stateName) + "=" +
+                        motion.Key.ToString(CultureInfo.InvariantCulture));
+                }
+                else
+                {
+                    Logger.LogWarning(
+                        "Discarded unavailable picker motion " + choice.Key + "=" + choice.Value);
+                }
+            }
+            _characterStateMotions.Value = string.Join(";", savedMotions.ToArray());
+
+            var savedFaces = new List<string>();
+            foreach (KeyValuePair<string, MiniFaceSelection> choice in _pickerStateFaces
+                         .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                int characterId;
+                string stateName;
+                string error;
+                bool valid = TryParsePickerMotionKey(
+                        choice.Key,
+                        out characterId,
+                        out stateName) &&
+                    _pickerCharacters.Any(character => character.Id == characterId) &&
+                    choice.Value != null &&
+                    choice.Value.TryValidate(out error);
+                if (valid)
+                {
+                    savedFaces.Add(
+                        MotionOverrideKey(
+                            characterId.ToString(CultureInfo.InvariantCulture),
+                            stateName) + "=" + SerializeMiniFaceSelection(choice.Value));
+                }
+                else
+                {
+                    Logger.LogWarning("Discarded invalid picker face " + choice.Key);
+                }
+            }
+            _characterStateFaces.Value = string.Join(";", savedFaces.ToArray());
+
+            _pickerStateMotions.Clear();
+            foreach (KeyValuePair<string, string> saved in
+                     ParsePickerMotionSelections(_characterStateMotions.Value))
+            {
+                _pickerStateMotions[saved.Key] = saved.Value;
+            }
+            _pickerStateFaces.Clear();
+            foreach (KeyValuePair<string, MiniFaceSelection> saved in
+                     ParsePickerFaceSelections(_characterStateFaces.Value))
+            {
+                _pickerStateFaces[saved.Key] = saved.Value.Clone();
+            }
             Config.Save();
             _pickerStatus = "Saved " + _pickerSelected.Count + " characters.";
             Logger.LogInfo("Character picker saved: " + value);
@@ -633,7 +2192,8 @@ namespace UmaPetForge
 
                 if (action == PickerAction.SaveAndExport)
                 {
-                    _pickerOpen = false;
+                    RestorePickerFacePreview();
+                    SetPickerOpen(false);
                     _exportRequested = true;
                 }
             }
@@ -723,6 +2283,10 @@ namespace UmaPetForge
                 Config.Reload();
                 WriteSelectionCatalogs();
                 _motionOverrides = LoadMotionOverrides();
+                _configuredPickerMotions = ParsePickerMotionSelections(
+                    _characterStateMotions.Value);
+                _configuredPickerFaces = ParsePickerFaceSelections(
+                    _characterStateFaces.Value);
                 _configuredCostumes = ParseCostumeSelections(_characterCostumes.Value);
                 _miniCostumeOptions = BuildMiniCostumeCatalog(
                     UmaViewerMain.Instance.Characters.Where(character => !character.IsMob));
@@ -812,6 +2376,7 @@ namespace UmaPetForge
         {
             var builder = UmaViewerBuilder.Instance;
             Texture2D atlas = null;
+            MiniFaceMaterials faceMaterials = null;
 
             try
             {
@@ -844,6 +2409,33 @@ namespace UmaPetForge
                         compatible,
                         character.Id,
                         result.Warnings);
+                }
+
+                var resolvedFaces = new Dictionary<string, MiniFaceSelection>(
+                    StringComparer.OrdinalIgnoreCase);
+                foreach (StateDefinition state in States)
+                {
+                    string faceKey = MotionOverrideKey(
+                        character.Id.ToString(CultureInfo.InvariantCulture),
+                        state.Name);
+                    MiniFaceSelection faceSelection;
+                    if (_configuredPickerFaces.TryGetValue(faceKey, out faceSelection))
+                    {
+                        resolvedFaces[state.Name] = faceSelection.Clone();
+                    }
+                }
+
+                if (resolvedFaces.Count > 0)
+                {
+                    string faceError;
+                    if (!MiniFaceMaterials.TryCapture(
+                            container,
+                            out faceMaterials,
+                            out faceError))
+                    {
+                        result.Warnings.Add(faceError + " All configured faces fell back to Auto.");
+                        resolvedFaces.Clear();
+                    }
                 }
 
                 string petFolderName = PetSlug(character.GetName());
@@ -889,6 +2481,10 @@ namespace UmaPetForge
                         Directory.CreateDirectory(framesDirectory);
                     }
 
+                    if (faceMaterials != null)
+                    {
+                        faceMaterials.RestoreBaseline();
+                    }
                     container.transform.localRotation = Quaternion.Euler(0f, state.YawDegrees, 0f);
                     container.LoadAnimation(resolution.Entry);
                     yield return null;
@@ -913,8 +2509,25 @@ namespace UmaPetForge
                         for (int attempt = 0; attempt < recoveryOffsets.Length; attempt++)
                         {
                             float recoveryTime = AdjustSampleTime(normalizedTime + recoveryOffsets[attempt], loop);
+                            if (faceMaterials != null)
+                            {
+                                faceMaterials.RestoreBaseline();
+                            }
                             SeekAnimator(container, recoveryTime);
                             yield return new WaitForEndOfFrame();
+
+                            MiniFaceSelection stateFace;
+                            if (faceMaterials != null &&
+                                resolvedFaces.TryGetValue(state.Name, out stateFace))
+                            {
+                                string faceError;
+                                if (!faceMaterials.TryApply(stateFace, out faceError))
+                                {
+                                    result.Warnings.Add(
+                                        state.Name + ": " + faceError + " Falling back to Auto.");
+                                    resolvedFaces.Remove(state.Name);
+                                }
+                            }
 
                             Texture2D candidate = CaptureFrame(Camera.main);
                             if (HasVisiblePixels(candidate))
@@ -976,6 +2589,10 @@ namespace UmaPetForge
                     }
                 }
 
+                if (faceMaterials != null)
+                {
+                    faceMaterials.RestoreBaseline();
+                }
                 container.transform.localRotation = Quaternion.identity;
                 atlas.Apply(false, false);
                 ValidateAtlas(atlas);
@@ -986,6 +2603,7 @@ namespace UmaPetForge
                     character,
                     costumeId,
                     resolved,
+                    resolvedFaces,
                     result.Warnings);
                 WriteCodexPetManifest(
                     Path.Combine(characterDirectory, "pet.json"),
@@ -1005,6 +2623,10 @@ namespace UmaPetForge
 
                 if (builder.CurrentUMAContainer != null)
                 {
+                    if (faceMaterials != null)
+                    {
+                        faceMaterials.RestoreBaseline();
+                    }
                     builder.CurrentUMAContainer.transform.localRotation = Quaternion.identity;
                 }
             }
@@ -1154,6 +2776,151 @@ namespace UmaPetForge
                 result[characterId] = costumeId;
             }
             return result;
+        }
+
+        private static Dictionary<string, string> ParsePickerMotionSelections(string configured)
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string[] rows = (configured ?? string.Empty)
+                .Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string raw in rows)
+            {
+                string row = raw.Trim();
+                int separator = row.IndexOf('=');
+                if (separator <= 0)
+                {
+                    continue;
+                }
+
+                int characterId;
+                string stateName;
+                long motionKey;
+                if (!TryParsePickerMotionKey(
+                        row.Substring(0, separator).Trim(),
+                        out characterId,
+                        out stateName) ||
+                    !long.TryParse(
+                        row.Substring(separator + 1).Trim(),
+                        NumberStyles.Integer,
+                        CultureInfo.InvariantCulture,
+                        out motionKey))
+                {
+                    continue;
+                }
+
+                result[MotionOverrideKey(
+                    characterId.ToString(CultureInfo.InvariantCulture),
+                    stateName)] = motionKey.ToString(CultureInfo.InvariantCulture);
+            }
+            return result;
+        }
+
+        private static Dictionary<string, MiniFaceSelection> ParsePickerFaceSelections(
+            string configured)
+        {
+            var result = new Dictionary<string, MiniFaceSelection>(
+                StringComparer.OrdinalIgnoreCase);
+            string[] rows = (configured ?? string.Empty)
+                .Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string raw in rows)
+            {
+                string row = raw.Trim();
+                int separator = row.IndexOf('=');
+                int characterId;
+                string stateName;
+                MiniFaceSelection selection;
+                if (separator <= 0 ||
+                    !TryParsePickerMotionKey(
+                        row.Substring(0, separator).Trim(),
+                        out characterId,
+                        out stateName) ||
+                    !TryParseMiniFaceSelection(
+                        row.Substring(separator + 1).Trim(),
+                        out selection))
+                {
+                    continue;
+                }
+
+                result[MotionOverrideKey(
+                    characterId.ToString(CultureInfo.InvariantCulture),
+                    stateName)] = selection;
+            }
+            return result;
+        }
+
+        private static bool TryParseMiniFaceSelection(
+            string configured,
+            out MiniFaceSelection selection)
+        {
+            selection = null;
+            string[] values = (configured ?? string.Empty).Split(',');
+            if (values.Length != 5)
+            {
+                return false;
+            }
+
+            var parsed = new int[5];
+            for (int index = 0; index < values.Length; index++)
+            {
+                if (!int.TryParse(
+                        values[index].Trim(),
+                        NumberStyles.Integer,
+                        CultureInfo.InvariantCulture,
+                        out parsed[index]))
+                {
+                    return false;
+                }
+            }
+
+            var candidate = new MiniFaceSelection(
+                parsed[0], parsed[1], parsed[2], parsed[3], parsed[4]);
+            string error;
+            if (!candidate.TryValidate(out error))
+            {
+                return false;
+            }
+
+            selection = candidate;
+            return true;
+        }
+
+        private static string SerializeMiniFaceSelection(MiniFaceSelection selection)
+        {
+            return selection.EyeLeft.ToString(CultureInfo.InvariantCulture) + "," +
+                   selection.EyeRight.ToString(CultureInfo.InvariantCulture) + "," +
+                   selection.Mouth.ToString(CultureInfo.InvariantCulture) + "," +
+                   selection.EyebrowLeft.ToString(CultureInfo.InvariantCulture) + "," +
+                   selection.EyebrowRight.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private static bool TryParsePickerMotionKey(
+            string value,
+            out int characterId,
+            out string stateName)
+        {
+            characterId = 0;
+            stateName = string.Empty;
+            string input = (value ?? string.Empty).Trim();
+            int separator = input.IndexOf(':');
+            if (separator <= 0 ||
+                !int.TryParse(
+                    input.Substring(0, separator).Trim(),
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out characterId) ||
+                characterId <= 0)
+            {
+                return false;
+            }
+
+            string requestedState = input.Substring(separator + 1).Trim();
+            StateDefinition matchingState = States.FirstOrDefault(candidate =>
+                string.Equals(
+                    candidate.Name,
+                    requestedState,
+                    StringComparison.OrdinalIgnoreCase));
+            stateName = matchingState == null ? string.Empty : matchingState.Name;
+            return !string.IsNullOrEmpty(stateName);
         }
 
         private static bool IsSafeCostumeId(string value)
@@ -1337,7 +3104,14 @@ namespace UmaPetForge
             int characterId)
         {
             return motions.Where(entry =>
-                IsGeneralMotion(entry.Name) || MotionMatchesCharacter(entry.Name, characterId))
+            {
+                int targetedCharacterId;
+                if (TryGetMotionCharacterId(entry.Name, out targetedCharacterId))
+                {
+                    return targetedCharacterId == characterId;
+                }
+                return IsGeneralMotion(entry.Name);
+            })
                 .OrderBy(entry => entry.Name, StringComparer.Ordinal)
                 .ToList();
         }
@@ -1355,6 +3129,12 @@ namespace UmaPetForge
             return lower.Contains("/type0") || lower.Contains("/type99") || lower.Contains("anm_sty_");
         }
 
+        private static bool IsCharacterSpecificMotion(string name)
+        {
+            int characterId;
+            return TryGetMotionCharacterId(name, out characterId);
+        }
+
         private static bool TryGetMotionCharacterId(string name, out int characterId)
         {
             characterId = 0;
@@ -1363,24 +3143,36 @@ namespace UmaPetForge
                 return false;
             }
 
-            const string marker = "/chara/chr";
-            int markerIndex = name.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-            if (markerIndex < 0)
+            for (int index = 0; index <= name.Length - 4; index++)
             {
-                return false;
-            }
+                if ((index > 0 && char.IsLetterOrDigit(name[index - 1])) ||
+                    !string.Equals(
+                        name.Substring(index, 3),
+                        "chr",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !char.IsDigit(name[index + 3]))
+                {
+                    continue;
+                }
 
-            int start = markerIndex + marker.Length;
-            int end = start;
-            while (end < name.Length && char.IsDigit(name[end]))
-            {
-                end++;
+                int start = index + 3;
+                int end = start;
+                while (end < name.Length && char.IsDigit(name[end]))
+                {
+                    end++;
+                }
+                if (end - start < 4)
+                {
+                    continue;
+                }
+
+                return int.TryParse(
+                    name.Substring(start, end - start),
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out characterId);
             }
-            return end > start && int.TryParse(
-                name.Substring(start, end - start),
-                NumberStyles.None,
-                CultureInfo.InvariantCulture,
-                out characterId);
+            return false;
         }
 
         private MotionResolution ResolveMotion(
@@ -1389,8 +3181,39 @@ namespace UmaPetForge
             int characterId,
             IList<string> warnings)
         {
+            string selectionKey = MotionOverrideKey(
+                characterId.ToString(CultureInfo.InvariantCulture),
+                state.Name);
+            string pickerConfigured;
+            if (_configuredPickerMotions.TryGetValue(selectionKey, out pickerConfigured))
+            {
+                UmaDatabaseEntry pickerMotion = ResolveConfiguredMotion(
+                    pickerConfigured,
+                    candidates);
+                if (pickerMotion != null)
+                {
+                    return new MotionResolution(
+                        pickerMotion,
+                        0,
+                        false,
+                        pickerConfigured,
+                        "picker_selection");
+                }
+
+                string pickerWarning = state.Name +
+                    ": saved F6 motion is unavailable or incompatible: " +
+                    pickerConfigured + "; falling back to CSV or automatic selection";
+                warnings.Add(pickerWarning);
+                Logger.LogWarning(characterId + " " + pickerWarning);
+            }
+
             string configured;
-            TryGetMotionOverride(characterId, state.Name, out configured);
+            string configuredSource;
+            TryGetMotionOverride(
+                characterId,
+                state.Name,
+                out configured,
+                out configuredSource);
             configured = (configured ?? string.Empty).Trim();
             if (!string.IsNullOrEmpty(configured) &&
                 !string.Equals(configured, "auto", StringComparison.OrdinalIgnoreCase))
@@ -1398,7 +3221,12 @@ namespace UmaPetForge
                 UmaDatabaseEntry overridden = ResolveConfiguredMotion(configured, candidates);
                 if (overridden != null)
                 {
-                    return new MotionResolution(overridden, 0, false, configured);
+                    return new MotionResolution(
+                        overridden,
+                        0,
+                        false,
+                        configured,
+                        configuredSource);
                 }
 
                 string warning = state.Name +
@@ -1431,7 +3259,7 @@ namespace UmaPetForge
 
             if (foundSemanticMatch && best != null)
             {
-                return new MotionResolution(best, bestScore, false, null);
+                return new MotionResolution(best, bestScore, false, null, "automatic");
             }
 
             UmaDatabaseEntry fallback = candidates.FirstOrDefault(candidate =>
@@ -1447,19 +3275,42 @@ namespace UmaPetForge
                 fallback = candidates.FirstOrDefault();
             }
 
-            return new MotionResolution(fallback, bestScore, true, null);
+            return new MotionResolution(fallback, bestScore, true, null, "automatic");
         }
 
         private bool TryGetMotionOverride(int characterId, string state, out string configured)
+        {
+            string ignoredSource;
+            return TryGetMotionOverride(
+                characterId,
+                state,
+                out configured,
+                out ignoredSource);
+        }
+
+        private bool TryGetMotionOverride(
+            int characterId,
+            string state,
+            out string configured,
+            out string source)
         {
             if (_motionOverrides.TryGetValue(
                     MotionOverrideKey(characterId.ToString(CultureInfo.InvariantCulture), state),
                     out configured))
             {
+                source = "csv_exact";
                 return true;
             }
 
-            return _motionOverrides.TryGetValue(MotionOverrideKey("*", state), out configured);
+            if (_motionOverrides.TryGetValue(MotionOverrideKey("*", state), out configured))
+            {
+                source = "csv_wildcard";
+                return true;
+            }
+
+            configured = null;
+            source = "automatic";
+            return false;
         }
 
         private void ValidateMotionOverrides(
@@ -1473,6 +3324,17 @@ namespace UmaPetForge
                 List<UmaDatabaseEntry> compatible = GetCompatibleMotions(motions, character.Id);
                 foreach (StateDefinition state in States)
                 {
+                    string pickerConfigured;
+                    if (_configuredPickerMotions.TryGetValue(
+                            MotionOverrideKey(
+                                character.Id.ToString(CultureInfo.InvariantCulture),
+                                state.Name),
+                            out pickerConfigured) &&
+                        ResolveConfiguredMotion(pickerConfigured, compatible) != null)
+                    {
+                        continue;
+                    }
+
                     string configured;
                     if (!TryGetMotionOverride(character.Id, state.Name, out configured))
                     {
@@ -1556,11 +3418,11 @@ namespace UmaPetForge
             {
                 score += 18;
             }
-            if (IsGeneralMotion(path))
+            if (!IsCharacterSpecificMotion(path) && IsGeneralMotion(path))
             {
                 score += 8;
             }
-            if (lower.Contains("chara/chr" + characterId))
+            if (MotionMatchesCharacter(path, characterId))
             {
                 score += 6;
             }
@@ -2099,7 +3961,24 @@ namespace UmaPetForge
                 Environment.NewLine +
                 "Auto uses that character's default Mini outfit." +
                 Environment.NewLine + Environment.NewLine +
-                "MOTIONS" + Environment.NewLine +
+                "PET ANIMATIONS AND FACES" + Environment.NewLine +
+                "In F6, select a character and click Animations/Face." +
+                Environment.NewLine +
+                "Choose separate motions and static Mini faces for all nine canonical pet states." +
+                Environment.NewLine +
+                "Idle recommendations include every discovered dance; hover/jump includes near05; every page also includes that Uma's character-specific clips." +
+                Environment.NewLine +
+                "The picker is resizable, and its input is isolated from UmaViewer controls while open." +
+                Environment.NewLine +
+                "Choosing a motion previews it immediately. If needed, UmaPetForge first loads that Mini with the clothes selected in F6." +
+                Environment.NewLine +
+                "Leave a motion on Auto to use the advanced CSV fallback, then automatic selection." +
+                Environment.NewLine +
+                "Opening a face editor automatically loads the matching Mini when needed, then applies each face change live." +
+                Environment.NewLine +
+                "The face editor browses the local Mini eye, mouth, and eyebrow texture slots; Auto keeps the default face." +
+                Environment.NewLine + Environment.NewLine +
+                "MOTIONS (ADVANCED FILE AND WILDCARD OVERRIDES)" + Environment.NewLine +
                 "Edit " + overrideDisplay + "." +
                 Environment.NewLine +
                 "CSV format: character_id,state,motion_key_or_path" + Environment.NewLine +
@@ -2198,9 +4077,9 @@ namespace UmaPetForge
                 first = false;
                 int characterId;
                 bool hasCharacterId = TryGetMotionCharacterId(motion.Name, out characterId);
-                string scope = IsGeneralMotion(motion.Name)
-                    ? "general"
-                    : hasCharacterId ? "character" : "other";
+                string scope = hasCharacterId
+                    ? "character"
+                    : IsGeneralMotion(motion.Name) ? "general" : "other";
                 builder.Append("    { \"key\": \"")
                     .Append(motion.Key.ToString(CultureInfo.InvariantCulture))
                     .Append("\", \"name\": \"")
@@ -2326,6 +4205,7 @@ namespace UmaPetForge
             CharaEntry character,
             string costumeId,
             IDictionary<string, MotionResolution> resolved,
+            IDictionary<string, MiniFaceSelection> resolvedFaces,
             IList<string> warnings)
         {
             var builder = new StringBuilder();
@@ -2365,12 +4245,35 @@ namespace UmaPetForge
                     .Append(", \"fallback\": ")
                     .Append(resolution.Fallback ? "true" : "false")
                     .Append(", \"source\": \"")
-                    .Append(resolution.ConfiguredOverride == null ? "automatic" : "configured_override")
+                    .Append(JsonEscape(resolution.Source))
                     .Append("\"")
                     .Append(", \"configured_override\": ")
                     .Append(resolution.ConfiguredOverride == null
                         ? "null"
                         : "\"" + JsonEscape(resolution.ConfiguredOverride) + "\"")
+                    .Append(", \"face\": ");
+                MiniFaceSelection face;
+                if (resolvedFaces == null || !resolvedFaces.TryGetValue(state.Name, out face))
+                {
+                    builder.Append("null")
+                        .Append(", \"face_source\": \"automatic\"");
+                }
+                else
+                {
+                    builder.Append("{ \"eye_left\": ")
+                        .Append(face.EyeLeft.ToString(CultureInfo.InvariantCulture))
+                        .Append(", \"eye_right\": ")
+                        .Append(face.EyeRight.ToString(CultureInfo.InvariantCulture))
+                        .Append(", \"mouth\": ")
+                        .Append(face.Mouth.ToString(CultureInfo.InvariantCulture))
+                        .Append(", \"eyebrow_left\": ")
+                        .Append(face.EyebrowLeft.ToString(CultureInfo.InvariantCulture))
+                        .Append(", \"eyebrow_right\": ")
+                        .Append(face.EyebrowRight.ToString(CultureInfo.InvariantCulture))
+                        .Append(" }")
+                        .Append(", \"face_source\": \"picker_selection\"");
+                }
+                builder
                     .Append(", \"yaw_degrees\": ")
                     .Append(state.YawDegrees.ToString("0.###", CultureInfo.InvariantCulture))
                     .Append(" }");
@@ -2515,17 +4418,20 @@ namespace UmaPetForge
             public readonly int Score;
             public readonly bool Fallback;
             public readonly string ConfiguredOverride;
+            public readonly string Source;
 
             public MotionResolution(
                 UmaDatabaseEntry entry,
                 int score,
                 bool fallback,
-                string configuredOverride)
+                string configuredOverride,
+                string source)
             {
                 Entry = entry;
                 Score = score;
                 Fallback = fallback;
                 ConfiguredOverride = configuredOverride;
+                Source = source;
             }
         }
 
