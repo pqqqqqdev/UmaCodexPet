@@ -1,9 +1,9 @@
-# UmaPetForge
+# UmaCodexPet
 
 **Batch-export authentic, locally rendered Uma chibi animations as Codex
 desktop pets.**
 
-UmaPetForge is a small BepInEx plugin for UmaViewer. It reads the asset index
+UmaCodexPet is a small BepInEx plugin for UmaViewer. It reads the asset index
 already loaded by UmaViewer, renders game-authored mini models and motions on
 your machine, and assembles transparent PNG atlases in the format expected by
 Codex desktop custom pets. Press <kbd>F6</kbd> to open a searchable character
@@ -19,7 +19,7 @@ animations, databases, game files, UmaViewer binaries, or BepInEx binaries are
 included in this repository or its plugin archive.
 
 > [!IMPORTANT]
-> UmaPetForge is an unofficial interoperability tool for local use. It is not
+> UmaCodexPet is an unofficial interoperability tool for local use. It is not
 > affiliated with or endorsed by Cygames, the UmaViewer maintainers, Unity, or
 > OpenAI. You must supply a legitimate game installation and comply with all
 > applicable terms. Do not redistribute generated sheets unless you have the
@@ -30,7 +30,7 @@ included in this repository or its plugin archive.
 > `1536 × 1872`, sliced as an `8 × 9` grid of `192 × 208` cells. The
 > Windows app currently ignores custom `fps` values and custom frame maps in
 > `pet.json`; it uses its built-in state timing and frame slots instead.
-> UmaPetForge therefore cannot raise the displayed animation FPS, add new pet
+> UmaCodexPet therefore cannot raise the displayed animation FPS, add new pet
 > states, or change the canonical frame counts on Windows. Motion selection
 > changes which UmaViewer clip is rendered into each existing state. Rendering at 4×
 > before downsampling improves edge quality, but it cannot increase the final
@@ -92,12 +92,19 @@ as unverified until documented otherwise.
    page, install the BepInEx 5 **Windows x64 Unity Mono** archive into the
    folder containing `UmaViewer.exe`. Launch UmaViewer once so BepInEx creates
    its folders, then close it.
-4. Download the latest UmaPetForge release archive and extract it into that
+4. Download the latest UmaCodexPet release archive and extract it into that
    same UmaViewer folder. Confirm this file exists:
 
    ```text
-   <UmaViewer>\BepInEx\plugins\UmaPetForge\UmaPetForge.dll
+   <UmaViewer>\BepInEx\plugins\UmaCodexPet\UmaCodexPet.dll
    ```
+
+   **Upgrading from UmaPetForge 0.2 or a private test build:** close
+   UmaViewer and delete `BepInEx\plugins\UmaPetForge\` before extracting the
+   new archive. Do not delete `BepInEx\config\dev.pqqqqq.umapetforge.cfg`;
+   UmaCodexPet imports its characters, clothes, motions, faces, and other
+   settings once, then keeps the legacy file as a rollback backup. Existing
+   `UmaPetForge_Output` exports are left untouched.
 
 5. Start UmaViewer and wait for its character lists and preview to finish
    loading.
@@ -123,10 +130,10 @@ a run is active is intentionally ignored.
 By default, results appear under:
 
 ```text
-<UmaViewer>\UmaPetForge_Output\<timestamp>\
+<UmaViewer>\UmaCodexPet_Output\<timestamp>\
 ```
 
-UmaPetForge only creates output files; it does not publish or activate them.
+UmaCodexPet only creates output files; it does not publish or activate them.
 Review the canonical `atlas.png` sheet and smoke-test the generated pet through
 the target app's supported custom-pet workflow before publishing a release.
 
@@ -150,7 +157,7 @@ Editing `Characters` directly remains supported as an advanced fallback. It
 accepts a comma-separated set of display names or numeric IDs:
 
 ```text
-<UmaViewer>\BepInEx\config\dev.pqqqqq.umapetforge.cfg
+<UmaViewer>\BepInEx\config\dev.pqqqqq.umacodexpet.cfg
 ```
 
 For example:
@@ -165,7 +172,7 @@ Select a character in the <kbd>F6</kbd> picker, then click the **Clothes**
 button on that row. The second screen is searchable by outfit display name or
 costume ID and contains only Mini outfits discovered in the local UmaViewer
 asset index. Choose one outfit to return to the character list, or choose
-**Auto / character default** to let UmaPetForge select the normal Mini outfit.
+**Auto / character default** to let UmaCodexPet select the normal Mini outfit.
 Each selected character can use a different outfit.
 
 The picker stores explicit outfit choices in the generated BepInEx setting
@@ -210,14 +217,14 @@ catalog. Friendly labels end in **Character** or **General**, so character-only
 motions can be distinguished from shared motions without reading asset paths.
 
 Selecting a motion previews it immediately on a matching loaded Mini. If that
-Mini is absent, UmaPetForge automatically loads the selected character with
+Mini is absent, UmaCodexPet automatically loads the selected character with
 the outfit currently chosen in F6 and then starts the chosen clip. The list
 stays open after a selection so several motions can be clicked and compared
 back-to-back. Use **Load Mini for preview** when no preview is ready, **Retry
 preview** after a failed load, or **Reload selected clothes** to rebuild the
 Mini after changing its F6 outfit. **Auto / advanced CSV fallback** removes the
 F6 choice: a valid CSV override is then used if one exists, otherwise
-UmaPetForge uses its automatic motion resolver.
+UmaCodexPet uses its automatic motion resolver.
 
 Each state's **Face** button controls a static set of Mini texture slots:
 left and right eye (`0`–`14`), mouth (`0`–`18`), and left and right eyebrow
@@ -248,17 +255,17 @@ Press <kbd>F7</kbd> after UmaViewer finishes loading to refresh the stable,
 non-timestamped catalog directory:
 
 ```text
-<UmaViewer>\UmaPetForge_Output\catalog\
+<UmaViewer>\UmaCodexPet_Output\catalog\
 ├── characters.json
 ├── mini-animation-catalog.json
 └── HOW_TO_SELECT.txt
 ```
 
 With the default `MotionOverridesFile` setting, it also creates
-`UmaPetForge_Overrides.csv` beside `UmaViewer.exe` if that file does not already
+`UmaCodexPet_Overrides.csv` beside `UmaViewer.exe` if that file does not already
 exist.
 
-To choose a source clip for a state, edit `UmaPetForge_Overrides.csv`. Each
+To choose a source clip for a state, edit `UmaCodexPet_Overrides.csv`. Each
 enabled row has this form:
 
 ```csv
@@ -285,9 +292,9 @@ rules, bulk editing, and reproducible advanced overrides. Pressing
 so changing an advanced selection does not require restarting UmaViewer.
 
 See the committed
-[`dev.pqqqqq.umapetforge.example.cfg`](config/dev.pqqqqq.umapetforge.example.cfg)
+[`dev.pqqqqq.umacodexpet.example.cfg`](config/dev.pqqqqq.umacodexpet.example.cfg)
 and
-[`UmaPetForge_Overrides.example.csv`](config/UmaPetForge_Overrides.example.csv)
+[`UmaCodexPet_Overrides.example.csv`](config/UmaCodexPet_Overrides.example.csv)
 for copyable defaults and examples.
 
 ## Output format
@@ -323,7 +330,7 @@ or still previews are diagnostics only and are not substitutes for `atlas.png`.
 A successful run produces:
 
 ```text
-UmaPetForge_Output\<timestamp>\
+UmaCodexPet_Output\<timestamp>\
 ├── mini-animation-catalog.json
 ├── export-manifest.json
 ├── EXPORT_COMPLETE.txt
@@ -349,12 +356,12 @@ make the result reproducible without sharing game assets.
 ```mermaid
 flowchart TD
     A["Local Steam data"] --> B["UmaViewer asset index"]
-    B --> C["UmaPetForge plugin"]
+    B --> C["UmaCodexPet plugin"]
     C --> D["Motion/face resolver and frame sampler"]
     D --> E["Atlas, frames, and manifests"]
 ```
 
-UmaPetForge runs inside the existing Mono build of UmaViewer rather than
+UmaCodexPet runs inside the existing Mono build of UmaViewer rather than
 rebuilding or screen-scraping it. After UmaViewer signals that initialization
 is complete, the plugin:
 
@@ -387,9 +394,14 @@ The generated BepInEx config contains seven settings under `[General]`:
 | `CharacterCostumes` | Empty | Semicolon-separated `characterId=costumeId` choices managed by the F6 picker; empty means Auto |
 | `CharacterStateMotions` | Empty | Semicolon-separated `characterId:state=motionKey` choices managed by the F6 Animations/Face page; empty means CSV/Auto |
 | `CharacterStateFaces` | Empty | Semicolon-separated `characterId:state=eyeL,eyeR,mouth,browL,browR` static Mini face choices managed by F6; empty means the default face |
-| `OutputDirectory` | `UmaPetForge_Output` | Output folder beneath the UmaViewer directory |
+| `OutputDirectory` | `UmaCodexPet_Output` | Output folder beneath the UmaViewer directory |
 | `WriteIndividualFrames` | `true` | Keep sampled frames in addition to `atlas.png` |
-| `MotionOverridesFile` | `UmaPetForge_Overrides.csv` | Viewer-relative optional motion-override CSV |
+| `MotionOverridesFile` | `UmaCodexPet_Overrides.csv` | Viewer-relative optional motion-override CSV |
+
+On the first renamed launch, an existing `dev.pqqqqq.umapetforge.cfg` is copied
+to the new config automatically when no UmaCodexPet config exists. Exact legacy
+default paths are translated to the new names; custom paths are preserved. If
+the legacy default override CSV exists, it is copied rather than moved.
 
 Use a short relative directory name for `OutputDirectory`. Generated output is
 ignored by this repository and should not be committed.
@@ -401,19 +413,22 @@ ignored by this repository and should not be committed.
 - Make sure UmaViewer is the focused window.
 - Wait until UmaViewer has finished populating its lists and can display a Mini
   model.
-- Confirm `UmaPetForge.dll` is under
-  `BepInEx\plugins\UmaPetForge\`, not one extra nested folder down.
-- Open `BepInEx\LogOutput.log` and search for `UmaPetForge`.
+- Confirm `UmaCodexPet.dll` is under
+  `BepInEx\plugins\UmaCodexPet\`, not one extra nested folder down.
+- Open `BepInEx\LogOutput.log` and search for `UmaCodexPet`.
 - Confirm you installed the Mono x64 build of BepInEx 5, not an IL2CPP build.
 
 ### The F6 picker does not appear
 
 - Keep the UmaViewer window focused when pressing <kbd>F6</kbd>.
-- Wait for the green `UmaPetForge ready` message and for UmaViewer's character
+- Wait for the green `UmaCodexPet ready` message and for UmaViewer's character
   list to finish loading.
 - Press <kbd>F6</kbd> again if the picker was already open but hidden behind
   another window.
-- Check `BepInEx\LogOutput.log` for `UmaPetForge picker failed`.
+- Check `BepInEx\LogOutput.log` for `UmaCodexPet picker failed`.
+- If you upgraded from UmaPetForge, remove every old `UmaPetForge.dll` under
+  `BepInEx\plugins`. BepInEx blocks the renamed plugin while the incompatible
+  legacy plugin is still installed, preventing two F6 exporters from running.
 
 ### A character is missing or fails to load
 
@@ -435,7 +450,7 @@ asset bundles themselves.
 
 Wait for the automatic matching-Mini load to finish; face controls remain
 locked until UmaViewer has created the model and its Mini face materials.
-UmaPetForge uses the character and clothes currently chosen in F6. If the load
+UmaCodexPet uses the character and clothes currently chosen in F6. If the load
 fails, use **Retry preview**. If the wrong or stale outfit is visible after a
 clothes change, use **Reload selected clothes**. Confirm UmaViewer can load the
 same character manually under **Characters → Mini** if retries still fail.
@@ -457,7 +472,7 @@ desktop app and is not a Windows FPS repair.
 
 ### The pet looks pixelated
 
-Windows displays each atlas cell as a `192 × 208` raster image. UmaPetForge
+Windows displays each atlas cell as a `192 × 208` raster image. UmaCodexPet
 renders at 4× and alpha-correctly downsamples to reduce jagged edges, but it
 cannot increase that final resolution. A larger pet-size setting therefore
 also enlarges the existing pixels.
@@ -505,7 +520,7 @@ timestamp directory:
 ```bash
 python -m pip install -r requirements-tools.txt
 python scripts/normalize_atlases.py \
-  "/path/to/UmaPetForge_Output/<timestamp>" \
+  "/path/to/UmaCodexPet_Output/<timestamp>" \
   "/path/to/normalized-output"
 ```
 
@@ -576,7 +591,7 @@ upload generated sheets.
 
 ## Legal and licensing
 
-UmaPetForge's original source and documentation are available under the
+UmaCodexPet's original source and documentation are available under the
 [MIT License](LICENSE). That license applies only to this repository's work; it
 does not cover UmaViewer, BepInEx, the game, or exported images.
 

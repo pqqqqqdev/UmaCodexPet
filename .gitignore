@@ -1,5 +1,6 @@
 artifacts/
 artifacts-v*/
+UmaCodexPet_Output/
 UmaPetForge_Output/
 **/bin/
 **/obj/

@@ -1,4 +1,4 @@
-# Contributing to UmaPetForge
+# Contributing to UmaCodexPet
 
 Thanks for helping make local, reproducible pet exports easier. Small bug
 fixes, renderer compatibility improvements, motion-selection rules,
@@ -6,9 +6,9 @@ documentation, and validation tests are all welcome.
 
 ## Before opening an issue
 
-1. Reproduce the problem with the latest UmaPetForge and UmaViewer releases.
+1. Reproduce the problem with the latest UmaCodexPet and UmaViewer releases.
 2. Check existing issues for the same symptom.
-3. Collect the UmaPetForge log and the smallest useful set of reproduction
+3. Collect the UmaCodexPet log and the smallest useful set of reproduction
    details.
 4. Remove usernames and local paths before posting.
 
@@ -52,7 +52,7 @@ To copy the resulting DLL into the test installation as part of the build, run:
 The installed path is:
 
 ```text
-<UmaViewer>\BepInEx\plugins\UmaPetForge\UmaPetForge.dll
+<UmaViewer>\BepInEx\plugins\UmaCodexPet\UmaCodexPet.dll
 ```
 
 Launch UmaViewer and inspect `BepInEx\LogOutput.log` for plugin messages.

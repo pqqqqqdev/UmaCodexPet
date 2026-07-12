@@ -1,13 +1,13 @@
 # Third-party software and content
 
-UmaPetForge is an independent interoperability tool. The repository contains
+UmaCodexPet is an independent interoperability tool. The repository contains
 only original plugin source, build files, and documentation. It does not
 contain or grant rights to game models, textures, animations, audio, database
 files, Unity runtime files, UmaViewer binaries, or BepInEx binaries.
 
 ## Runtime relationships
 
-| Project or content | Owner / upstream | Relationship to UmaPetForge | Included here? |
+| Project or content | Owner / upstream | Relationship to UmaCodexPet | Included here? |
 | --- | --- | --- | --- |
 | Uma Musume: Pretty Derby | Cygames, Inc. | User-supplied local source data | No |
 | UmaViewer | [katboi01/UmaViewer](https://github.com/katboi01/UmaViewer) | Host application and renderer | No |
@@ -25,7 +25,7 @@ from their official release channels.
 
 ## Asset boundary
 
-UmaPetForge resolves asset identifiers at runtime and asks the user's local
+UmaCodexPet resolves asset identifiers at runtime and asks the user's local
 UmaViewer process to render them. No game asset is embedded in the plugin or
 its configuration. Exported images remain derived from the user's locally
 installed content and are **not** covered by this repository's MIT License.
@@ -38,7 +38,7 @@ you have permission from the relevant rightsholder.
 ## Trademarks and affiliation
 
 Uma Musume: Pretty Derby and related names, characters, artwork, and marks are
-the property of their respective owners. UmaPetForge is not affiliated with,
+the property of their respective owners. UmaCodexPet is not affiliated with,
 authorized by, sponsored by, or endorsed by Cygames, the UmaViewer maintainers,
 Unity Technologies, or OpenAI.
 

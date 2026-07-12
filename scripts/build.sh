@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-project="$repo_root/src/UmaPetForge/UmaPetForge.csproj"
+project="$repo_root/src/UmaCodexPet/UmaCodexPet.csproj"
 configuration="${CONFIGURATION:-Release}"
 viewer_dir="${UMAVIEWER_DIR:-}"
 version="${VERSION:-}"
@@ -60,16 +60,16 @@ fi
 "$dotnet_bin" "${build_args[@]}"
 
 build_dir="$repo_root/artifacts/bin/$configuration/net472"
-plugin_dll="$build_dir/UmaPetForge.dll"
+plugin_dll="$build_dir/UmaCodexPet.dll"
 [[ -f "$plugin_dll" ]] || { echo "Expected build output was not produced: $plugin_dll" >&2; exit 1; }
 
 package_root="$repo_root/artifacts/package"
-package_dir="$package_root/BepInEx/plugins/UmaPetForge"
+package_dir="$package_root/BepInEx/plugins/UmaCodexPet"
 rm -rf "$repo_root/artifacts/package"
 mkdir -p "$package_dir"
 cp "$plugin_dll" "$package_dir/"
-if [[ -f "$build_dir/UmaPetForge.pdb" ]]; then
-  cp "$build_dir/UmaPetForge.pdb" "$package_dir/"
+if [[ -f "$build_dir/UmaCodexPet.pdb" ]]; then
+  cp "$build_dir/UmaCodexPet.pdb" "$package_dir/"
 fi
 
 # Keep release contents on an explicit allowlist. In particular, never copy
@@ -81,16 +81,27 @@ done
 
 package_config_dir="$package_root/config"
 mkdir -p "$package_config_dir"
-for config_file in dev.pqqqqq.umapetforge.example.cfg UmaPetForge_Overrides.example.csv; do
+for config_file in dev.pqqqqq.umacodexpet.example.cfg UmaCodexPet_Overrides.example.csv; do
   [[ -f "$repo_root/config/$config_file" ]] || { echo "Required config example is missing: config/$config_file" >&2; exit 1; }
   cp "$repo_root/config/$config_file" "$package_config_dir/"
 done
 
 if [[ "$install" == true ]]; then
-  install_dir="$viewer_dir/BepInEx/plugins/UmaPetForge"
+  plugins_root="$viewer_dir/BepInEx/plugins"
+  legacy_install_dir="$plugins_root/UmaPetForge"
+  legacy_files_removed=0
+  while IFS= read -r -d '' legacy_file; do
+    rm -f "$legacy_file"
+    legacy_files_removed=$((legacy_files_removed + 1))
+  done < <(find "$plugins_root" -type f \( -iname 'UmaPetForge.dll' -o -iname 'UmaPetForge.pdb' \) -print0)
+  rmdir "$legacy_install_dir" 2>/dev/null || true
+  if (( legacy_files_removed > 0 )); then
+    echo "Removed $legacy_files_removed legacy UmaPetForge plugin file(s)"
+  fi
+  install_dir="$viewer_dir/BepInEx/plugins/UmaCodexPet"
   mkdir -p "$install_dir"
-  cp "$plugin_dll" "$install_dir/UmaPetForge.dll"
-  echo "Installed $install_dir/UmaPetForge.dll"
+  cp "$plugin_dll" "$install_dir/UmaCodexPet.dll"
+  echo "Installed $install_dir/UmaCodexPet.dll"
 fi
 
 echo "Built $plugin_dll"

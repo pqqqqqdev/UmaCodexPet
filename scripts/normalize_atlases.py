@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministically fit UmaPetForge atlases to the ChatGPT pet cell volume.
+"""Deterministically fit UmaCodexPet atlases to the ChatGPT pet cell volume.
 
 This tool never generates or redraws artwork. It applies one common crop and
 one common scale per character to pixels already rendered by UmaViewer, so
@@ -233,7 +233,7 @@ def find_atlases(input_root: Path) -> List[Path]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", type=Path, help="UmaPetForge timestamp directory")
+    parser.add_argument("input", type=Path, help="UmaCodexPet timestamp directory")
     parser.add_argument("output", type=Path, help="Destination directory")
     return parser.parse_args()
 
@@ -248,7 +248,7 @@ def main() -> None:
         reports.append(normalize_one(source_path, destination_path))
 
     manifest = {
-        "format": "UmaPetForge normalized atlas report",
+        "format": "UmaCodexPet normalized atlas report",
         "layout": {
             "atlas": list(ATLAS_SIZE),
             "cell": [CELL_WIDTH, CELL_HEIGHT],
