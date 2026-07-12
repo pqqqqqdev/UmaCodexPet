@@ -13,6 +13,7 @@ using UnityEngine.Rendering.PostProcessing;
 namespace UmaPetForge
 {
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
+    [DefaultExecutionOrder(-10000)]
     public sealed class UmaPetForgePlugin : BaseUnityPlugin
     {
         public const string PluginGuid = "dev.pqqqqq.umapetforge";
@@ -26,6 +27,10 @@ namespace UmaPetForge
         private const int SupersampleFactor = 4;
         private const int CaptureWidth = CellWidth * SupersampleFactor;
         private const int CaptureHeight = CellHeight * SupersampleFactor;
+        private const float PickerMinimumWidth = 560f;
+        private const float PickerMinimumHeight = 360f;
+        private const float PickerResizeHandleSize = 22f;
+        private const int PickerResizeControlHint = 0x554D42;
 
         private static readonly int[][] StateSpriteIndices =
         {
@@ -62,14 +67,6 @@ namespace UmaPetForge
                 new[] { "check", "see", "near", "look", "inspect", "search", "read" })
         };
 
-        private static readonly string[] PickerMotionStates =
-        {
-            "idle",
-            "run_right",
-            "run_left",
-            "jump"
-        };
-
         private const string DefaultCharacters = "";
         private const string LegacyDefaultCharacters =
             "Special Week, Silence Suzuka, Tokai Teio, Mejiro McQueen, Gold Ship, " +
@@ -101,8 +98,13 @@ namespace UmaPetForge
         private List<CharaEntry> _pickerCharacters = new List<CharaEntry>();
         private List<UmaDatabaseEntry> _pickerMiniMotions = new List<UmaDatabaseEntry>();
         private Rect _pickerWindowRect;
+        private bool _pickerWindowInitialized;
+        private bool _pickerResizePending;
+        private Vector2 _pickerResizeOffset;
+        private Vector2 _pickerRequestedSize;
         private Vector2 _pickerScroll;
         private Vector2 _pickerCostumeScroll;
+        private Vector2 _pickerStateScroll;
         private Vector2 _pickerMotionScroll;
         private string _pickerSearch = string.Empty;
         private string _pickerCostumeSearch = string.Empty;
@@ -122,6 +124,11 @@ namespace UmaPetForge
         private string _pickerPreviewCostumeId = string.Empty;
         private UmaDatabaseEntry _pickerPreviewMotion;
         private string _pickerPreviewError = string.Empty;
+        private bool _pickerInputIsolationActive;
+        private bool _pickerPreviousInteractionInProgress;
+        private CameraOrbit _pickerCameraOrbit;
+        private bool _pickerCameraOrbitWasEnabled;
+        private bool _pickerSuppressInputNextFrame;
         private bool _pickerOpen;
         private PickerAction _pickerAction;
         private bool _exportRequested;
@@ -196,6 +203,23 @@ namespace UmaPetForge
                 return;
             }
 
+            bool pickerTogglePressed = Input.GetKeyDown(KeyCode.F6);
+            bool catalogPressed = Input.GetKeyDown(KeyCode.F7);
+            bool exportPressed = Input.GetKeyDown(KeyCode.F8);
+            if (_pickerOpen)
+            {
+                // The picker is modal. Clear legacy input before the viewer's
+                // normal controls update so wheel, drag, and held buttons do
+                // not also move its camera or edit controls behind the picker.
+                Input.ResetInputAxes();
+                MaintainPickerInputIsolation();
+            }
+            else if (_pickerSuppressInputNextFrame)
+            {
+                Input.ResetInputAxes();
+                _pickerSuppressInputNextFrame = false;
+            }
+
             if (_pickerPreviewRequested && !_pickerPreviewLoading && !_running)
             {
                 _pickerPreviewRequested = false;
@@ -207,7 +231,7 @@ namespace UmaPetForge
                 return;
             }
 
-            if (Input.GetKeyDown(KeyCode.F6))
+            if (pickerTogglePressed)
             {
                 if (IsPickerPreviewBusy())
                 {
@@ -249,7 +273,7 @@ namespace UmaPetForge
                 return;
             }
 
-            if (Input.GetKeyDown(KeyCode.F7))
+            if (catalogPressed)
             {
                 _running = true;
                 try
@@ -271,7 +295,7 @@ namespace UmaPetForge
                 return;
             }
 
-            if (Input.GetKeyDown(KeyCode.F8))
+            if (exportPressed)
             {
                 RestorePickerFacePreview();
                 if (_pickerOpen && !SavePickerSelection(true))
@@ -291,7 +315,7 @@ namespace UmaPetForge
                         return;
                     }
                 }
-                _pickerOpen = false;
+                SetPickerOpen(false);
                 StartCoroutine(ExportBatch());
             }
         }
@@ -313,11 +337,18 @@ namespace UmaPetForge
             GUI.depth = -1000;
             try
             {
-                _pickerWindowRect = GUI.Window(
+                Rect nextWindowRect = GUI.ModalWindow(
                     GetInstanceID() ^ PickerWindowId,
                     _pickerWindowRect,
                     DrawCharacterPicker,
                     "UmaPetForge Pet Picker");
+                if (_pickerResizePending)
+                {
+                    nextWindowRect.width = _pickerRequestedSize.x;
+                    nextWindowRect.height = _pickerRequestedSize.y;
+                    _pickerResizePending = false;
+                }
+                _pickerWindowRect = nextWindowRect;
                 ClampPickerWindowRect();
             }
             finally
@@ -331,7 +362,7 @@ namespace UmaPetForge
             if (_pickerOpen)
             {
                 RestorePickerFacePreview();
-                _pickerOpen = false;
+                SetPickerOpen(false);
                 return;
             }
 
@@ -345,6 +376,7 @@ namespace UmaPetForge
                 _pickerCostumeSearch = string.Empty;
                 _pickerMotionCharacterId = -1;
                 _pickerMotionState = string.Empty;
+                _pickerStateScroll = Vector2.zero;
                 _pickerMotionSearch = string.Empty;
                 _pickerFaceState = string.Empty;
                 _pickerFaceDraft = null;
@@ -357,13 +389,70 @@ namespace UmaPetForge
                 _pickerPreviewCostumeId = string.Empty;
                 _pickerPreviewMotion = null;
                 _pickerPreviewError = string.Empty;
-                _pickerOpen = true;
+                SetPickerOpen(true);
             }
             catch (Exception exception)
             {
                 Logger.LogError(exception);
                 ShowViewerMessage("UmaPetForge picker failed — check log", UIMessageType.Error);
             }
+        }
+
+        private void SetPickerOpen(bool open)
+        {
+            if (open)
+            {
+                if (!_pickerInputIsolationActive)
+                {
+                    _pickerPreviousInteractionInProgress =
+                        HandleManager.InteractionInProgress;
+                    _pickerCameraOrbit = CameraOrbit.instance;
+                    _pickerCameraOrbitWasEnabled =
+                        _pickerCameraOrbit != null && _pickerCameraOrbit.enabled;
+                    _pickerInputIsolationActive = true;
+                }
+
+                _pickerOpen = true;
+                MaintainPickerInputIsolation();
+                return;
+            }
+
+            _pickerOpen = false;
+            _pickerResizePending = false;
+            _pickerSuppressInputNextFrame = true;
+            if (!_pickerInputIsolationActive)
+            {
+                return;
+            }
+
+            HandleManager.InteractionInProgress =
+                _pickerPreviousInteractionInProgress;
+            if (_pickerCameraOrbit != null)
+            {
+                _pickerCameraOrbit.enabled = _pickerCameraOrbitWasEnabled;
+            }
+            _pickerCameraOrbit = null;
+            _pickerInputIsolationActive = false;
+        }
+
+        private void MaintainPickerInputIsolation()
+        {
+            HandleManager.InteractionInProgress = true;
+            if (_pickerCameraOrbit == null && CameraOrbit.instance != null)
+            {
+                _pickerCameraOrbit = CameraOrbit.instance;
+                _pickerCameraOrbitWasEnabled = _pickerCameraOrbit.enabled;
+            }
+            if (_pickerCameraOrbit != null)
+            {
+                _pickerCameraOrbit.enabled = false;
+            }
+        }
+
+        private void OnDisable()
+        {
+            RestorePickerFacePreview();
+            SetPickerOpen(false);
         }
 
         private void LoadPickerSelection()
@@ -420,21 +509,44 @@ namespace UmaPetForge
 
         private void ResetPickerWindowRect()
         {
-            float width = Mathf.Min(640f, Mathf.Max(100f, Screen.width - 20f));
-            float height = Mathf.Min(720f, Mathf.Max(140f, Screen.height - 40f));
+            float maximumWidth = Mathf.Max(100f, Screen.width - 20f);
+            float maximumHeight = Mathf.Max(140f, Screen.height - 40f);
+            float width = _pickerWindowInitialized
+                ? _pickerWindowRect.width
+                : 640f;
+            float height = _pickerWindowInitialized
+                ? _pickerWindowRect.height
+                : 720f;
+            width = Mathf.Clamp(
+                width,
+                Mathf.Min(PickerMinimumWidth, maximumWidth),
+                maximumWidth);
+            height = Mathf.Clamp(
+                height,
+                Mathf.Min(PickerMinimumHeight, maximumHeight),
+                maximumHeight);
             _pickerWindowRect = new Rect(
                 Mathf.Max(10f, (Screen.width - width) * 0.5f),
                 Mathf.Max(30f, (Screen.height - height) * 0.5f),
                 width,
                 height);
+            _pickerWindowInitialized = true;
         }
 
         private void ClampPickerWindowRect()
         {
             float maxWidth = Mathf.Max(100f, Screen.width - 20f);
             float maxHeight = Mathf.Max(140f, Screen.height - 40f);
-            _pickerWindowRect.width = Mathf.Min(_pickerWindowRect.width, maxWidth);
-            _pickerWindowRect.height = Mathf.Min(_pickerWindowRect.height, maxHeight);
+            float minWidth = Mathf.Min(PickerMinimumWidth, maxWidth);
+            float minHeight = Mathf.Min(PickerMinimumHeight, maxHeight);
+            _pickerWindowRect.width = Mathf.Clamp(
+                _pickerWindowRect.width,
+                minWidth,
+                maxWidth);
+            _pickerWindowRect.height = Mathf.Clamp(
+                _pickerWindowRect.height,
+                minHeight,
+                maxHeight);
             _pickerWindowRect.x = Mathf.Clamp(
                 _pickerWindowRect.x,
                 0f,
@@ -450,7 +562,7 @@ namespace UmaPetForge
             if (_pickerCostumeCharacterId >= 0)
             {
                 DrawCostumePicker();
-                GUI.DragWindow(new Rect(0f, 0f, _pickerWindowRect.width, 24f));
+                FinishPickerWindow();
                 return;
             }
             if (_pickerMotionCharacterId >= 0)
@@ -470,12 +582,12 @@ namespace UmaPetForge
                     DrawMotionChoicePicker();
                 }
                 GUI.enabled = pageEnabled;
-                GUI.DragWindow(new Rect(0f, 0f, _pickerWindowRect.width, 24f));
+                FinishPickerWindow();
                 return;
             }
 
             GUILayout.Space(4f);
-            GUILayout.Label("Choose pets, clothes, interaction animations, and Mini faces exported by F8.");
+            GUILayout.Label("Choose pets, clothes, animations, and Mini faces exported by F8.");
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("Search", GUILayout.Width(54f));
@@ -559,6 +671,7 @@ namespace UmaPetForge
                     _pickerMotionCharacterId = character.Id;
                     _pickerMotionState = string.Empty;
                     _pickerFaceState = string.Empty;
+                    _pickerStateScroll = Vector2.zero;
                     _pickerMotionSearch = string.Empty;
                     _pickerMotionScroll = Vector2.zero;
                 }
@@ -575,7 +688,7 @@ namespace UmaPetForge
             if (GUILayout.Button("Cancel"))
             {
                 RestorePickerFacePreview();
-                _pickerOpen = false;
+                SetPickerOpen(false);
             }
 
             if (GUILayout.Button("Save"))
@@ -591,7 +704,66 @@ namespace UmaPetForge
             GUI.enabled = previousEnabled;
             GUILayout.EndHorizontal();
 
+            FinishPickerWindow();
+        }
+
+        private void FinishPickerWindow()
+        {
             GUI.DragWindow(new Rect(0f, 0f, _pickerWindowRect.width, 24f));
+            DrawPickerResizeHandle();
+        }
+
+        private void DrawPickerResizeHandle()
+        {
+            int controlId = GUIUtility.GetControlID(
+                GetInstanceID() ^ PickerResizeControlHint,
+                FocusType.Passive);
+            Rect handle = new Rect(
+                _pickerWindowRect.width - PickerResizeHandleSize - 4f,
+                _pickerWindowRect.height - PickerResizeHandleSize - 4f,
+                PickerResizeHandleSize,
+                PickerResizeHandleSize);
+            GUI.Box(handle, "↘");
+
+            Event current = Event.current;
+            switch (current.GetTypeForControl(controlId))
+            {
+                case EventType.MouseDown:
+                    if (current.button == 0 && handle.Contains(current.mousePosition))
+                    {
+                        GUIUtility.hotControl = controlId;
+                        _pickerResizeOffset = new Vector2(
+                            _pickerWindowRect.width - current.mousePosition.x,
+                            _pickerWindowRect.height - current.mousePosition.y);
+                        current.Use();
+                    }
+                    break;
+                case EventType.MouseDrag:
+                    if (GUIUtility.hotControl == controlId)
+                    {
+                        float maximumWidth = Mathf.Max(100f, Screen.width - 20f);
+                        float maximumHeight = Mathf.Max(140f, Screen.height - 40f);
+                        _pickerRequestedSize = new Vector2(
+                            Mathf.Clamp(
+                                current.mousePosition.x + _pickerResizeOffset.x,
+                                Mathf.Min(PickerMinimumWidth, maximumWidth),
+                                maximumWidth),
+                            Mathf.Clamp(
+                                current.mousePosition.y + _pickerResizeOffset.y,
+                                Mathf.Min(PickerMinimumHeight, maximumHeight),
+                                maximumHeight));
+                        _pickerResizePending = true;
+                        current.Use();
+                    }
+                    break;
+                case EventType.MouseUp:
+                    if (GUIUtility.hotControl == controlId)
+                    {
+                        GUIUtility.hotControl = 0;
+                        current.Use();
+                    }
+                    break;
+            }
         }
 
         private void DrawCostumePicker()
@@ -697,8 +869,14 @@ namespace UmaPetForge
             DrawPickerPreviewStatus(character);
 
             GUILayout.Space(8f);
-            foreach (string stateName in PickerMotionStates)
+            float listHeight = Mathf.Max(120f, _pickerWindowRect.height - 215f);
+            _pickerStateScroll = GUILayout.BeginScrollView(
+                _pickerStateScroll,
+                GUI.skin.box,
+                GUILayout.Height(listHeight));
+            foreach (StateDefinition state in States)
             {
+                string stateName = state.Name;
                 GUILayout.BeginHorizontal();
                 GUILayout.Label(GetPickerStateDisplayName(stateName), GUILayout.Width(130f));
                 if (GUILayout.Button(
@@ -719,13 +897,13 @@ namespace UmaPetForge
                 }
                 GUILayout.EndHorizontal();
             }
+            GUILayout.EndScrollView();
 
             if (!string.IsNullOrEmpty(_pickerStatus))
             {
                 GUILayout.Label(_pickerStatus);
             }
 
-            GUILayout.FlexibleSpace();
             GUILayout.Label(
                 "Tip: idle pins all dances, hover pins near05, and Character labels are that Uma's special clips.");
         }
@@ -1660,8 +1838,18 @@ namespace UmaPetForge
                     return "Move right";
                 case "run_left":
                     return "Move left";
+                case "wave":
+                    return "Wave / greeting";
                 case "jump":
                     return "Cursor hover / jump";
+                case "failure":
+                    return "Failure / error";
+                case "waiting":
+                    return "Waiting";
+                case "working":
+                    return "Working";
+                case "review":
+                    return "Review";
                 default:
                     return stateName;
             }
@@ -1762,6 +1950,36 @@ namespace UmaPetForge
             {
                 return "Recommended: near05, " + characterName +
                     " specials, and jump motions";
+            }
+            if (state.Name == "run_right" || state.Name == "run_left")
+            {
+                return "Recommended: " + characterName +
+                    " specials and run/walk motions";
+            }
+            if (state.Name == "wave")
+            {
+                return "Recommended: " + characterName +
+                    " specials and greeting/wave motions";
+            }
+            if (state.Name == "failure")
+            {
+                return "Recommended: " + characterName +
+                    " specials and failure/sad motions";
+            }
+            if (state.Name == "waiting")
+            {
+                return "Recommended: " + characterName +
+                    " specials and waiting/standing motions";
+            }
+            if (state.Name == "working")
+            {
+                return "Recommended: " + characterName +
+                    " specials and work/study motions";
+            }
+            if (state.Name == "review")
+            {
+                return "Recommended: " + characterName +
+                    " specials and review/look/read motions";
             }
             return "Recommended: " + characterName +
                 " character specials and matching motions";
@@ -1975,7 +2193,7 @@ namespace UmaPetForge
                 if (action == PickerAction.SaveAndExport)
                 {
                     RestorePickerFacePreview();
-                    _pickerOpen = false;
+                    SetPickerOpen(false);
                     _exportRequested = true;
                 }
             }
@@ -2696,8 +2914,12 @@ namespace UmaPetForge
             }
 
             string requestedState = input.Substring(separator + 1).Trim();
-            stateName = PickerMotionStates.FirstOrDefault(candidate =>
-                string.Equals(candidate, requestedState, StringComparison.OrdinalIgnoreCase));
+            StateDefinition matchingState = States.FirstOrDefault(candidate =>
+                string.Equals(
+                    candidate.Name,
+                    requestedState,
+                    StringComparison.OrdinalIgnoreCase));
+            stateName = matchingState == null ? string.Empty : matchingState.Name;
             return !string.IsNullOrEmpty(stateName);
         }
 
@@ -3739,12 +3961,14 @@ namespace UmaPetForge
                 Environment.NewLine +
                 "Auto uses that character's default Mini outfit." +
                 Environment.NewLine + Environment.NewLine +
-                "INTERACTION ANIMATIONS AND FACES" + Environment.NewLine +
+                "PET ANIMATIONS AND FACES" + Environment.NewLine +
                 "In F6, select a character and click Animations/Face." +
                 Environment.NewLine +
-                "Choose separate motions for idle/resting, move right, move left, and cursor hover/jump." +
+                "Choose separate motions and static Mini faces for all nine canonical pet states." +
                 Environment.NewLine +
                 "Idle recommendations include every discovered dance; hover/jump includes near05; every page also includes that Uma's character-specific clips." +
+                Environment.NewLine +
+                "The picker is resizable, and its input is isolated from UmaViewer controls while open." +
                 Environment.NewLine +
                 "Choosing a motion previews it immediately. If needed, UmaPetForge first loads that Mini with the clothes selected in F6." +
                 Environment.NewLine +
@@ -3754,7 +3978,7 @@ namespace UmaPetForge
                 Environment.NewLine +
                 "The face editor browses the local Mini eye, mouth, and eyebrow texture slots; Auto keeps the default face." +
                 Environment.NewLine + Environment.NewLine +
-                "MOTIONS (ADVANCED ALL-STATE OVERRIDES)" + Environment.NewLine +
+                "MOTIONS (ADVANCED FILE AND WILDCARD OVERRIDES)" + Environment.NewLine +
                 "Edit " + overrideDisplay + "." +
                 Environment.NewLine +
                 "CSV format: character_id,state,motion_key_or_path" + Environment.NewLine +

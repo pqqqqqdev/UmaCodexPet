@@ -8,8 +8,8 @@ already loaded by UmaViewer, renders game-authored mini models and motions on
 your machine, and assembles transparent PNG atlases in the format expected by
 Codex desktop custom pets. Press <kbd>F6</kbd> to open a searchable character
 picker inside UmaViewer, choose the separate pets and Mini clothes you want,
-choose per-character motions and static Mini faces for the four interactive
-Codex states, and save or export the selection. Fresh installs deliberately
+choose per-character motions and static Mini faces for all nine canonical pet
+states, and save or export the selection. Fresh installs deliberately
 start with no characters selected, and every motion and face starts on
 **Auto**. <kbd>F7</kbd> still generates catalogs and the optional advanced
 motion-override template.
@@ -45,8 +45,10 @@ included in this repository or its plugin archive.
 - also accepts character names or IDs through the BepInEx config as an
   advanced fallback;
 - discovers available mini animations from the local UmaViewer asset index;
-- provides searchable per-character motion choices for idle, run right, run
-  left, and cursor hover/jump while leaving **Auto** as the default;
+- provides searchable per-character motion and face choices for all nine
+  canonical pet states while leaving **Auto** as the default;
+- provides a resizable modal picker whose scroll, click, and drag input is
+  isolated from UmaViewer's camera and controls;
 - previews a selected motion immediately, loading the matching Mini and the
   outfit currently chosen in F6 when necessary, while keeping the motion list
   open so several clips can be compared quickly;
@@ -103,14 +105,14 @@ as unverified until documented otherwise.
    searchable character picker.
 7. Search by character name or ID and toggle the pets you want. On each
    selected row, use **Clothes** to choose a locally available Mini outfit and
-   **Animations/Face** to customize idle, run right, run left, and
-   hover/jump. Leave any choice on **Auto** to keep the normal behavior. The
+   **Animations/Face** to customize any of the nine canonical pet states.
+   Leave any choice on **Auto** to keep the normal behavior. The
    preview tools can load the selected character and current F6 outfit for you;
    wait for the preview-ready message before continuing if a load is queued.
 8. Choose **Save** to remember the choices without starting a batch, or
    **Save & Export** to remember them, close the picker, and export
    immediately. If you used **Save**, <kbd>F8</kbd> exports the saved selection.
-9. Only for advanced motion overrides across all nine canonical states, press
+9. For advanced wildcard or file-based motion overrides, press
    <kbd>F7</kbd> to refresh the catalogs and optional override CSV, edit that
    CSV, then press <kbd>F8</kbd>.
 
@@ -180,15 +182,24 @@ longer available after a game update, the export warns and falls back to Auto.
 ### Choosing motions and faces in UmaViewer
 
 Select a character in the <kbd>F6</kbd> picker, then click
-**Animations/Face**. The page exposes the four states that correspond to
-direct Codex pet interactions:
+**Animations/Face**. The page exposes all nine canonical states: four direct
+interaction states plus five task-status states. The state list scrolls
+when the picker is small, and the bottom-right grip resizes the whole picker:
 
 | Picker state | Codex behavior |
 | --- | --- |
 | **Idle / resting** | The pet is waiting on screen |
 | **Run right** | The pet is dragged or moves toward the right |
 | **Run left** | The pet is dragged or moves toward the left |
+| **Wave / greeting** | The canonical greeting slot |
 | **Hover / jump** | The pointer moves over the pet |
+| **Failure / error** | The canonical failure-reaction slot |
+| **Waiting** | The canonical waiting slot |
+| **Working** | The active-work or processing slot |
+| **Review** | The review or inspection slot |
+
+While F6 is open, the picker is modal: mouse-wheel, click, and drag input is
+kept away from UmaViewer's camera and controls behind it.
 
 Each state's **Motion** button opens a searchable list of compatible Mini
 clips. A blank search pins every compatible dance clip for **Idle**, `near05`
@@ -226,7 +237,7 @@ CharacterStateMotions = 1001:idle=-4064598427829042606;1001:run_left=44940580014
 CharacterStateFaces = 1001:idle=0,0,3,1,1;1001:jump=4,4,8,2,2
 ```
 
-For the four F6 states, selection precedence is: valid F6 motion, exact CSV
+For all nine F6 states, selection precedence is: valid F6 motion, exact CSV
 row, wildcard CSV row, then automatic resolution. An unavailable saved motion
 is discarded with a warning and falls through to the next source. Face
 choices are independent of motion selection and default to Auto.
@@ -268,9 +279,8 @@ character out of a wildcard. Valid states are `idle`, `run_right`, `run_left`,
 `wave`, `jump`, `failure`, `waiting`, `working`, and `review`.
 
 A missing or comments-only override CSV preserves automatic motion selection
-for states without an explicit F6 choice. The CSV remains useful for the five
-canonical states not exposed in the F6 shortcut page (`wave`, `failure`,
-`waiting`, `working`, and `review`) and for wildcard rules. Pressing
+for states without an explicit F6 choice. The CSV remains useful for wildcard
+rules, bulk editing, and reproducible advanced overrides. Pressing
 <kbd>F8</kbd> reloads the BepInEx config and override CSV before each export,
 so changing an advanced selection does not require restarting UmaViewer.
 
@@ -415,8 +425,8 @@ ignored by this repository and should not be committed.
 ### The motion does not fit the state
 
 Open <kbd>F6</kbd>, select the character, and use **Animations/Face** to choose
-a different compatible clip for idle, run right, run left, or hover/jump. For
-other states, or to debug selection precedence, check the state entry in
+a different compatible clip for any canonical state. To debug selection
+precedence, check the state entry in
 `resolved-clips.json` and the candidates in `mini-animation-catalog.json`.
 When reporting a bad choice, share those asset **names and IDs only**—never the
 asset bundles themselves.
@@ -530,18 +540,23 @@ selected character, outfit, motion, or face:
    character-specific specials appear. Click several choices and confirm each
    previews while the list remains open; check that **Character** and
    **General** labels and searches return the expected scopes.
-3. Confirm `EXPORT_COMPLETE.txt` exists and the batch and per-character
+3. Resize the picker from its bottom-right grip. At its minimum and maximum
+   sizes, scroll every subpage and confirm that clicking, dragging, or using the
+   wheel never changes UmaViewer's FOV, camera height, distance, or scene view.
+4. Save one unique motion and face for each of the nine states, reopen F6, and
+   confirm every choice persists.
+5. Confirm `EXPORT_COMPLETE.txt` exists and the batch and per-character
    manifests report success.
-4. Inspect the encoded `atlas.png` itself: it must be exactly `1536 × 1872`,
+6. Inspect the encoded `atlas.png` itself: it must be exactly `1536 × 1872`,
    every assigned frame must fit its `192 × 208` cell, and all 15 unused cells
    listed above must be fully transparent.
-5. Review every canonical state for wrong clips, clipping, edge contamination,
+7. Review every canonical state for wrong clips, clipping, edge contamination,
    neighbor-cell fragments, and inconsistent scale. Diagnostic previews are
    useful here, but they do not replace inspection of `atlas.png`.
-6. Smoke-test the generated pet in the target Windows app version through its
+8. Smoke-test the generated pet in the target Windows app version through its
    supported custom-pet workflow. Expect idle cadence to remain host-controlled;
    a slow idle is not evidence that the exporter can override the app's FPS.
-7. Before attaching release files, verify that the archive contains the plugin,
+9. Before attaching release files, verify that the archive contains the plugin,
    documentation, and configuration templates only—never generated atlases or
    proprietary game data.
 

@@ -5,7 +5,7 @@ All notable user-facing changes are recorded here.
 ## 0.3.0 - Unreleased
 
 - Added an <kbd>F6</kbd> **Animations/Face** page with separate per-character
-  motion choices for idle, run right, run left, and cursor hover/jump.
+  motion and static Mini face choices for all nine canonical pet states.
 - Added searchable, human-readable compatible motion lists whose friendly
   labels and search clearly mark clips as character-specific **Character**
   motions or shared **General** motions.
@@ -15,9 +15,13 @@ All notable user-facing changes are recorded here.
 - Selecting a motion now previews it immediately or automatically loads the
   matching Mini with the clothes currently chosen in F6. The motion list stays
   open so several clips can be compared back-to-back.
-- Kept **Auto** as the default for every state. For the four F6 states, a valid
+- Kept **Auto** as the default for every state. For all nine F6 states, a valid
   F6 choice takes precedence; otherwise the existing exact CSV, wildcard CSV,
   and automatic sources remain available in that order.
+- Made the F6 picker resizable from its bottom-right corner and added a
+  scrollable all-state page for compact window sizes.
+- Made the picker modal and isolated its mouse-wheel, click, and drag input
+  from UmaViewer's camera and controls while it is open.
 - Added static per-state Mini face controls for left/right eyes, mouth, and
   left/right eyebrows. If a matching Mini is absent, the face editor now
   automatically queues the selected character and current F6 clothes before
