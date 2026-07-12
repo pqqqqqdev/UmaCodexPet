@@ -2,6 +2,12 @@
 
 All notable user-facing changes are recorded here.
 
+## Unreleased
+
+- Fixed live motion previews remaining paused on one sampled frame after an
+  export by restoring UmaViewer's animation playback and root-motion state on
+  successful, failed, or interrupted export cleanup.
+
 ## 0.3.0 - 2026-07-12
 
 - Renamed the project, plugin, package, configuration, and output paths from

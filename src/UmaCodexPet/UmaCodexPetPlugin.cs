@@ -140,6 +140,8 @@ namespace UmaCodexPet
         private bool _exportRequested;
         private bool _viewerReady;
         private bool _running;
+        private CharacterRuntimeState _activeExportCharacterState;
+        private CameraState _activeExportCameraState;
 
         private const int PickerWindowId = 0x554D41;
 
@@ -548,6 +550,13 @@ namespace UmaCodexPet
 
         private void OnDisable()
         {
+            if (_running)
+            {
+                StopAllCoroutines();
+            }
+            RestoreActiveExportCharacterState();
+            RestoreActiveExportCameraState();
+            _running = false;
             RestorePickerFacePreview();
             SetPickerOpen(false);
         }
@@ -2334,30 +2343,44 @@ namespace UmaCodexPet
             IEnumerator routine = ExportBatchCore();
             Exception failure = null;
 
-            while (true)
+            try
             {
-                bool moved;
-                object current = null;
+                while (true)
+                {
+                    bool moved;
+                    object current = null;
+                    try
+                    {
+                        moved = routine.MoveNext();
+                        if (moved)
+                        {
+                            current = routine.Current;
+                        }
+                    }
+                    catch (Exception exception)
+                    {
+                        failure = exception;
+                        break;
+                    }
+
+                    if (!moved)
+                    {
+                        break;
+                    }
+
+                    yield return current;
+                }
+            }
+            finally
+            {
                 try
                 {
-                    moved = routine.MoveNext();
-                    if (moved)
-                    {
-                        current = routine.Current;
-                    }
+                    DisposeEnumerator(routine);
                 }
-                catch (Exception exception)
+                finally
                 {
-                    failure = exception;
-                    break;
+                    _running = false;
                 }
-
-                if (!moved)
-                {
-                    break;
-                }
-
-                yield return current;
             }
 
             if (failure != null)
@@ -2365,14 +2388,11 @@ namespace UmaCodexPet
                 Logger.LogError(failure);
                 ShowViewerMessage("UmaCodexPet failed — check BepInEx log", UIMessageType.Error);
             }
-
-            _running = false;
         }
 
         private IEnumerator ExportBatchCore()
         {
             string runRoot = null;
-            CameraState cameraState = null;
             var results = new List<CharacterResult>();
 
             try
@@ -2398,8 +2418,11 @@ namespace UmaCodexPet
                 runRoot = CreateRunDirectory();
                 WriteAnimationCatalog(Path.Combine(runRoot, "mini-animation-catalog.json"), allMiniMotions);
 
-                cameraState = CameraState.Capture(Camera.main, UmaViewerBuilder.Instance);
-                cameraState.PrepareForExport();
+                RestoreActiveExportCameraState();
+                _activeExportCameraState = CameraState.Capture(
+                    Camera.main,
+                    UmaViewerBuilder.Instance);
+                _activeExportCameraState.PrepareForExport();
                 Logger.LogInfo("Exporting " + roster.Count + " characters to " + runRoot);
                 ShowViewerMessage("UmaCodexPet export started", UIMessageType.Default);
 
@@ -2407,7 +2430,22 @@ namespace UmaCodexPet
                 {
                     CharacterResult result = new CharacterResult(character);
                     results.Add(result);
-                    yield return ExportCharacter(runRoot, character, allMiniMotions, result);
+                    IEnumerator characterRoutine = ExportCharacter(
+                        runRoot,
+                        character,
+                        allMiniMotions,
+                        result);
+                    try
+                    {
+                        while (characterRoutine.MoveNext())
+                        {
+                            yield return characterRoutine.Current;
+                        }
+                    }
+                    finally
+                    {
+                        DisposeEnumerator(characterRoutine);
+                    }
                 }
 
                 WriteExportManifest(Path.Combine(runRoot, "export-manifest.json"), results);
@@ -2423,10 +2461,7 @@ namespace UmaCodexPet
             }
             finally
             {
-                if (cameraState != null)
-                {
-                    cameraState.Restore();
-                }
+                RestoreActiveExportCameraState();
             }
         }
 
@@ -2437,31 +2472,89 @@ namespace UmaCodexPet
             CharacterResult result)
         {
             IEnumerator routine = ExportCharacterCore(runRoot, character, allMiniMotions, result);
-            while (true)
+            try
             {
-                bool moved;
-                object current = null;
-                try
+                while (true)
                 {
-                    moved = routine.MoveNext();
-                    if (moved)
+                    bool moved;
+                    object current = null;
+                    try
                     {
-                        current = routine.Current;
+                        moved = routine.MoveNext();
+                        if (moved)
+                        {
+                            current = routine.Current;
+                        }
                     }
-                }
-                catch (Exception exception)
-                {
-                    result.Error = exception.Message;
-                    Logger.LogError("Failed " + character.GetName() + ": " + exception);
-                    yield break;
-                }
+                    catch (Exception exception)
+                    {
+                        result.Error = exception.Message;
+                        Logger.LogError("Failed " + character.GetName() + ": " + exception);
+                        yield break;
+                    }
 
-                if (!moved)
-                {
-                    yield break;
-                }
+                    if (!moved)
+                    {
+                        yield break;
+                    }
 
-                yield return current;
+                    yield return current;
+                }
+            }
+            finally
+            {
+                DisposeEnumerator(routine);
+            }
+        }
+
+        private static void DisposeEnumerator(IEnumerator routine)
+        {
+            IDisposable disposable = routine as IDisposable;
+            if (disposable != null)
+            {
+                disposable.Dispose();
+            }
+        }
+
+        private void RestoreActiveExportCharacterState()
+        {
+            CharacterRuntimeState state = _activeExportCharacterState;
+            _activeExportCharacterState = null;
+            if (state == null)
+            {
+                return;
+            }
+
+            try
+            {
+                state.Restore();
+            }
+            catch (Exception exception)
+            {
+                Logger.LogWarning(
+                    "Could not restore UmaViewer animation state after export: " +
+                    exception.Message);
+            }
+        }
+
+        private void RestoreActiveExportCameraState()
+        {
+            CameraState state = _activeExportCameraState;
+            _activeExportCameraState = null;
+            if (state == null)
+            {
+                return;
+            }
+
+            try
+            {
+                state.Restore();
+            }
+            catch (Exception exception)
+            {
+                Logger.LogWarning(
+                    "Could not restore UmaViewer camera state after export: " +
+                    exception.Message);
             }
         }
 
@@ -2496,6 +2589,8 @@ namespace UmaCodexPet
                 {
                     throw new InvalidOperationException("UmaViewer did not create a usable Mini model.");
                 }
+                RestoreActiveExportCharacterState();
+                _activeExportCharacterState = CharacterRuntimeState.Capture(container);
 
                 List<UmaDatabaseEntry> compatible = GetCompatibleMotions(allMiniMotions, character.Id);
                 var resolved = new Dictionary<string, MotionResolution>(StringComparer.Ordinal);
@@ -2713,18 +2808,25 @@ namespace UmaCodexPet
             }
             finally
             {
-                if (atlas != null)
+                try
                 {
-                    Destroy(atlas);
-                }
-
-                if (builder.CurrentUMAContainer != null)
-                {
-                    if (faceMaterials != null)
+                    if (atlas != null)
                     {
-                        faceMaterials.RestoreBaseline();
+                        Destroy(atlas);
                     }
-                    builder.CurrentUMAContainer.transform.localRotation = Quaternion.identity;
+
+                    if (builder.CurrentUMAContainer != null)
+                    {
+                        if (faceMaterials != null)
+                        {
+                            faceMaterials.RestoreBaseline();
+                        }
+                        builder.CurrentUMAContainer.transform.localRotation = Quaternion.identity;
+                    }
+                }
+                finally
+                {
+                    RestoreActiveExportCharacterState();
                 }
             }
         }
@@ -4652,6 +4754,67 @@ namespace UmaCodexPet
                        Height.ToString(CultureInfo.InvariantCulture) + "+" +
                        MinX.ToString(CultureInfo.InvariantCulture) + "+" +
                        MinY.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        private sealed class CharacterRuntimeState
+        {
+            private readonly UmaContainerCharacter _container;
+            private readonly Quaternion _localRotation;
+            private readonly Animator _bodyAnimator;
+            private readonly float _bodySpeed;
+            private readonly bool _bodyApplyRootMotion;
+            private readonly bool _hasBodyLayerTwo;
+            private readonly float _bodyLayerTwoWeight;
+            private readonly Animator _faceAnimator;
+            private readonly float _faceSpeed;
+
+            private CharacterRuntimeState(UmaContainerCharacter container)
+            {
+                _container = container;
+                _localRotation = container.transform.localRotation;
+                _bodyAnimator = container.UmaAnimator;
+                _bodySpeed = _bodyAnimator.speed;
+                _bodyApplyRootMotion = _bodyAnimator.applyRootMotion;
+                _hasBodyLayerTwo = _bodyAnimator.layerCount > 2;
+                if (_hasBodyLayerTwo)
+                {
+                    _bodyLayerTwoWeight = _bodyAnimator.GetLayerWeight(2);
+                }
+
+                _faceAnimator = container.UmaFaceAnimator;
+                if (_faceAnimator != null)
+                {
+                    _faceSpeed = _faceAnimator.speed;
+                }
+            }
+
+            public static CharacterRuntimeState Capture(UmaContainerCharacter container)
+            {
+                return new CharacterRuntimeState(container);
+            }
+
+            public void Restore()
+            {
+                if (_container != null)
+                {
+                    _container.transform.localRotation = _localRotation;
+                }
+
+                if (_bodyAnimator != null)
+                {
+                    _bodyAnimator.applyRootMotion = _bodyApplyRootMotion;
+                    if (_hasBodyLayerTwo)
+                    {
+                        _bodyAnimator.SetLayerWeight(2, _bodyLayerTwoWeight);
+                    }
+                    _bodyAnimator.speed = _bodySpeed;
+                }
+
+                if (_faceAnimator != null)
+                {
+                    _faceAnimator.speed = _faceSpeed;
+                }
             }
         }
 
