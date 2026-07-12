@@ -40,6 +40,9 @@ included in this repository or its plugin archive.
 
 - starts with no preselected characters and exports only the pets you choose;
 - provides a searchable <kbd>F6</kbd> character picker inside UmaViewer;
+- previews an individually selected character immediately and reloads that
+  Mini when explicit or Auto clothes change, keeping only the latest queued
+  preview when choices are made quickly;
 - discovers locally available, game-authored Mini clothes and lets each
   selected character use a separate outfit;
 - also accepts character names or IDs through the BepInEx config as an
@@ -113,9 +116,10 @@ as unverified until documented otherwise.
 7. Search by character name or ID and toggle the pets you want. On each
    selected row, use **Clothes** to choose a locally available Mini outfit and
    **Animations/Face** to customize any of the nine canonical pet states.
-   Leave any choice on **Auto** to keep the normal behavior. The
-   preview tools can load the selected character and current F6 outfit for you;
-   wait for the preview-ready message before continuing if a load is queued.
+   Leave any choice on **Auto** to keep the normal behavior. Selecting one row
+   loads that Mini directly, and choosing explicit or Auto clothes reloads the
+   visible preview. Wait for the preview-ready message before editing motions
+   or faces if a load is queued.
 8. Choose **Save** to remember the choices without starting a batch, or
    **Save & Export** to remember them, close the picker, and export
    immediately. If you used **Save**, <kbd>F8</kbd> exports the saved selection.
@@ -147,6 +151,12 @@ Use **Select All** to choose every loaded character, **Select Visible** to add
 every current search result, or **Clear** to start over. A full **Select All**
 export can take a long time.
 
+Toggling an individual character on queues that character's Mini and current
+draft clothes for live preview without saving the picker. Bulk selection does
+not choose an arbitrary preview target. If several individual choices are made
+while UmaViewer is loading, UmaCodexPet finishes the active load safely and
+keeps only the latest queued choice.
+
 Fresh installs start with zero selected characters. Upgrading from a build that
 still has the exact old 12-character default roster also clears that legacy
 default so the picker starts empty; any custom roster is preserved. **Save**
@@ -173,7 +183,9 @@ button on that row. The second screen is searchable by outfit display name or
 costume ID and contains only Mini outfits discovered in the local UmaViewer
 asset index. Choose one outfit to return to the character list, or choose
 **Auto / character default** to let UmaCodexPet select the normal Mini outfit.
-Each selected character can use a different outfit.
+Each selected character can use a different outfit. Either choice immediately
+queues a reload of that character for live preview; changing clothes quickly
+replaces obsolete queued reloads with the latest choice.
 
 The picker stores explicit outfit choices in the generated BepInEx setting
 `CharacterCostumes`. Editing it directly is an advanced fallback; its format is
@@ -547,31 +559,37 @@ stills. Preview files are never used as upload input; the validated atlas is.
 Do not publish a release based on a successful build alone. For every newly
 selected character, outfit, motion, or face:
 
-1. In F6, verify that opening a face editor with a different Mini loaded queues
+1. In F6, toggle one character directly and confirm its Mini appears. Choose an
+   explicit outfit, then Auto, and confirm each reloads the preview. While a
+   load is active, choose several characters or outfits quickly and confirm the
+   final visible Mini matches the latest choice without closing the picker.
+   Cancel and reopen to confirm drafts were not saved, then repeat with Save
+   and confirm the final character and clothes persist.
+2. Verify that opening a face editor with a different Mini loaded queues
    the selected character and current F6 clothes. Exercise **Retry preview**
    and **Reload selected clothes** at least once on the test machine.
-2. With a blank motion search, confirm all compatible dances are recommended
+3. With a blank motion search, confirm all compatible dances are recommended
    for idle, `near05` is recommended for hover/jump, and matching
    character-specific specials appear. Click several choices and confirm each
    previews while the list remains open; check that **Character** and
    **General** labels and searches return the expected scopes.
-3. Resize the picker from its bottom-right grip. At its minimum and maximum
+4. Resize the picker from its bottom-right grip. At its minimum and maximum
    sizes, scroll every subpage and confirm that clicking, dragging, or using the
    wheel never changes UmaViewer's FOV, camera height, distance, or scene view.
-4. Save one unique motion and face for each of the nine states, reopen F6, and
+5. Save one unique motion and face for each of the nine states, reopen F6, and
    confirm every choice persists.
-5. Confirm `EXPORT_COMPLETE.txt` exists and the batch and per-character
+6. Confirm `EXPORT_COMPLETE.txt` exists and the batch and per-character
    manifests report success.
-6. Inspect the encoded `atlas.png` itself: it must be exactly `1536 × 1872`,
+7. Inspect the encoded `atlas.png` itself: it must be exactly `1536 × 1872`,
    every assigned frame must fit its `192 × 208` cell, and all 15 unused cells
    listed above must be fully transparent.
-7. Review every canonical state for wrong clips, clipping, edge contamination,
+8. Review every canonical state for wrong clips, clipping, edge contamination,
    neighbor-cell fragments, and inconsistent scale. Diagnostic previews are
    useful here, but they do not replace inspection of `atlas.png`.
-8. Smoke-test the generated pet in the target Windows app version through its
+9. Smoke-test the generated pet in the target Windows app version through its
    supported custom-pet workflow. Expect idle cadence to remain host-controlled;
    a slow idle is not evidence that the exporter can override the app's FPS.
-9. Before attaching release files, verify that the archive contains the plugin,
+10. Before attaching release files, verify that the archive contains the plugin,
    documentation, and configuration templates only—never generated atlases or
    proprietary game data.
 

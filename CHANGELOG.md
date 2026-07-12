@@ -4,6 +4,9 @@ All notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Added direct Mini previews when selecting an individual character or choosing
+  explicit or Auto clothes in F6. Rapid changes now keep one safe load active
+  and replace queued work with the latest choice.
 - Fixed live motion previews remaining paused on one sampled frame after an
   export by restoring UmaViewer's animation playback and root-motion state on
   successful, failed, or interrupted export cleanup.
