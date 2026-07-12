@@ -2,7 +2,7 @@
 
 All notable user-facing changes are recorded here.
 
-## 0.3.0 - Unreleased
+## 0.3.0 - 2026-07-12
 
 - Added an <kbd>F6</kbd> **Animations/Face** page with separate per-character
   motion and static Mini face choices for all nine canonical pet states.
