@@ -3,7 +3,7 @@
     <TargetFramework>net472</TargetFramework>
     <AssemblyName>UmaPetForge</AssemblyName>
     <RootNamespace>UmaPetForge</RootNamespace>
-    <VersionPrefix>0.2.0</VersionPrefix>
+    <VersionPrefix>0.3.0</VersionPrefix>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
     <UmaViewerDir Condition="'$(UmaViewerDir)' == ''">$(UMAVIEWER_DIR)</UmaViewerDir>

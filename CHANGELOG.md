@@ -2,6 +2,34 @@
 
 All notable user-facing changes are recorded here.
 
+## 0.3.0 - Unreleased
+
+- Added an <kbd>F6</kbd> **Animations/Face** page with separate per-character
+  motion choices for idle, run right, run left, and cursor hover/jump.
+- Added searchable, human-readable compatible motion lists whose friendly
+  labels and search clearly mark clips as character-specific **Character**
+  motions or shared **General** motions.
+- Added blank-search recommendations that pin all compatible dance clips for
+  idle, `near05` for cursor hover/jump, and matching character-specific
+  specials alongside each state's normal choices.
+- Selecting a motion now previews it immediately or automatically loads the
+  matching Mini with the clothes currently chosen in F6. The motion list stays
+  open so several clips can be compared back-to-back.
+- Kept **Auto** as the default for every state. For the four F6 states, a valid
+  F6 choice takes precedence; otherwise the existing exact CSV, wildcard CSV,
+  and automatic sources remain available in that order.
+- Added static per-state Mini face controls for left/right eyes, mouth, and
+  left/right eyebrows. If a matching Mini is absent, the face editor now
+  automatically queues the selected character and current F6 clothes before
+  enabling its live controls.
+- Added **Load Mini for preview**, **Retry preview**, and **Reload selected
+  clothes** controls for starting or recovering motion and face previews.
+- Added explicit motion and face sources and configured face slots to the
+  per-character audit manifest.
+- Preserved the Windows Codex host's fixed state timing, frame counts, and
+  `192 × 208` cell limit; these controls change source poses, not host FPS or
+  final sprite resolution.
+
 ## 0.2.0 - 2026-07-12
 
 Initial public alpha.
