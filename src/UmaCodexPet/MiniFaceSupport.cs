@@ -2,7 +2,7 @@ using System;
 using System.Globalization;
 using UnityEngine;
 
-namespace UmaPetForge
+namespace UmaCodexPet
 {
     internal sealed class MiniFaceSelection : IEquatable<MiniFaceSelection>
     {

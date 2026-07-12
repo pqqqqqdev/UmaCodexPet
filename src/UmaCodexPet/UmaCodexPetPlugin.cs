@@ -10,15 +10,21 @@ using BepInEx.Configuration;
 using UnityEngine;
 using UnityEngine.Rendering.PostProcessing;
 
-namespace UmaPetForge
+namespace UmaCodexPet
 {
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
+    [BepInIncompatibility(LegacyPluginGuid)]
     [DefaultExecutionOrder(-10000)]
-    public sealed class UmaPetForgePlugin : BaseUnityPlugin
+    public sealed class UmaCodexPetPlugin : BaseUnityPlugin
     {
-        public const string PluginGuid = "dev.pqqqqq.umapetforge";
-        public const string PluginName = "UmaPetForge";
+        public const string PluginGuid = "dev.pqqqqq.umacodexpet";
+        public const string PluginName = "UmaCodexPet";
         public const string PluginVersion = "0.3.0";
+        private const string LegacyPluginGuid = "dev.pqqqqq.umapetforge";
+        private const string DefaultOutputDirectory = "UmaCodexPet_Output";
+        private const string LegacyDefaultOutputDirectory = "UmaPetForge_Output";
+        private const string DefaultOverridesFile = "UmaCodexPet_Overrides.csv";
+        private const string LegacyDefaultOverridesFile = "UmaPetForge_Overrides.csv";
 
         private const int CellWidth = 192;
         private const int CellHeight = 208;
@@ -146,6 +152,7 @@ namespace UmaPetForge
 
         private void Awake()
         {
+            bool migratedLegacyConfig = TryImportLegacyConfig();
             _characters = Config.Bind(
                 "General",
                 "Characters",
@@ -154,7 +161,7 @@ namespace UmaPetForge
             _outputDirectory = Config.Bind(
                 "General",
                 "OutputDirectory",
-                "UmaPetForge_Output",
+                DefaultOutputDirectory,
                 "Relative output directory beneath the UmaViewer folder.");
             _writeIndividualFrames = Config.Bind(
                 "General",
@@ -164,7 +171,7 @@ namespace UmaPetForge
             _motionOverridesFile = Config.Bind(
                 "General",
                 "MotionOverridesFile",
-                "UmaPetForge_Overrides.csv",
+                DefaultOverridesFile,
                 "Optional viewer-relative CSV with character_id,state,motion_key_or_path rows.");
             _characterCostumes = Config.Bind(
                 "General",
@@ -182,6 +189,11 @@ namespace UmaPetForge
                 "",
                 "Semicolon-separated characterId:state=eyeL,eyeR,mouth,browL,browR choices managed by the F6 picker.");
 
+            if (migratedLegacyConfig)
+            {
+                NormalizeMigratedLegacyDefaults();
+            }
+
             if (string.Equals(
                     _characters.Value,
                     LegacyDefaultCharacters,
@@ -194,6 +206,91 @@ namespace UmaPetForge
 
             Logger.LogInfo("Loaded. Waiting for UmaViewer initialization.");
             StartCoroutine(WaitForViewer());
+        }
+
+        private bool TryImportLegacyConfig()
+        {
+            string legacyConfigPath = Path.Combine(
+                Paths.ConfigPath,
+                LegacyPluginGuid + ".cfg");
+            if (File.Exists(Config.ConfigFilePath) || !File.Exists(legacyConfigPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                File.Copy(legacyConfigPath, Config.ConfigFilePath, false);
+                Config.Reload();
+                Logger.LogInfo(
+                    "Imported settings from the legacy UmaPetForge config. " +
+                    "The original file was kept as a rollback backup.");
+                return true;
+            }
+            catch (Exception exception)
+            {
+                Logger.LogWarning(
+                    "Could not import the legacy UmaPetForge config; " +
+                    "starting with the new UmaCodexPet defaults. " + exception.Message);
+                return false;
+            }
+        }
+
+        private void NormalizeMigratedLegacyDefaults()
+        {
+            bool changed = false;
+            if (string.Equals(
+                    (_outputDirectory.Value ?? string.Empty).Trim(),
+                    LegacyDefaultOutputDirectory,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                _outputDirectory.Value = DefaultOutputDirectory;
+                changed = true;
+            }
+
+            if (string.Equals(
+                    (_motionOverridesFile.Value ?? string.Empty).Trim(),
+                    LegacyDefaultOverridesFile,
+                    StringComparison.OrdinalIgnoreCase) &&
+                TryCopyLegacyOverridesFile())
+            {
+                _motionOverridesFile.Value = DefaultOverridesFile;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                Config.Save();
+            }
+        }
+
+        private bool TryCopyLegacyOverridesFile()
+        {
+            string legacyPath = Path.Combine(
+                Paths.GameRootPath,
+                LegacyDefaultOverridesFile);
+            string renamedPath = Path.Combine(
+                Paths.GameRootPath,
+                DefaultOverridesFile);
+            if (File.Exists(renamedPath) || !File.Exists(legacyPath))
+            {
+                return true;
+            }
+
+            try
+            {
+                File.Copy(legacyPath, renamedPath, false);
+                Logger.LogInfo(
+                    "Copied legacy motion overrides to " + DefaultOverridesFile + ".");
+                return true;
+            }
+            catch (Exception exception)
+            {
+                Logger.LogWarning(
+                    "Could not copy " + LegacyDefaultOverridesFile +
+                    "; keeping the legacy override path. " + exception.Message);
+                return false;
+            }
         }
 
         private void Update()
@@ -236,12 +333,12 @@ namespace UmaPetForge
                 if (IsPickerPreviewBusy())
                 {
                     ShowViewerMessage(
-                        "UmaPetForge Mini preview is still loading",
+                        "UmaCodexPet Mini preview is still loading",
                         UIMessageType.Default);
                 }
                 else if (_running)
                 {
-                    ShowViewerMessage("UmaPetForge export is already running", UIMessageType.Default);
+                    ShowViewerMessage("UmaCodexPet export is already running", UIMessageType.Default);
                 }
                 else
                 {
@@ -281,12 +378,12 @@ namespace UmaPetForge
                     Config.Reload();
                     string catalogDirectory = WriteSelectionCatalogs();
                     Logger.LogInfo("Selection catalogs written to " + catalogDirectory);
-                    ShowViewerMessage("UmaPetForge catalogs ready", UIMessageType.Success);
+                    ShowViewerMessage("UmaCodexPet catalogs ready", UIMessageType.Success);
                 }
                 catch (Exception exception)
                 {
                     Logger.LogError(exception);
-                    ShowViewerMessage("UmaPetForge catalog failed — check log", UIMessageType.Error);
+                    ShowViewerMessage("UmaCodexPet catalog failed — check log", UIMessageType.Error);
                 }
                 finally
                 {
@@ -310,7 +407,7 @@ namespace UmaPetForge
                         ToggleCharacterPicker();
                         _pickerStatus = "Select at least one character before exporting.";
                         ShowViewerMessage(
-                            "UmaPetForge: choose characters with F6",
+                            "UmaCodexPet: choose characters with F6",
                             UIMessageType.Default);
                         return;
                     }
@@ -341,7 +438,7 @@ namespace UmaPetForge
                     GetInstanceID() ^ PickerWindowId,
                     _pickerWindowRect,
                     DrawCharacterPicker,
-                    "UmaPetForge Pet Picker");
+                    "UmaCodexPet Pet Picker");
                 if (_pickerResizePending)
                 {
                     nextWindowRect.width = _pickerRequestedSize.x;
@@ -394,7 +491,7 @@ namespace UmaPetForge
             catch (Exception exception)
             {
                 Logger.LogError(exception);
-                ShowViewerMessage("UmaPetForge picker failed — check log", UIMessageType.Error);
+                ShowViewerMessage("UmaCodexPet picker failed — check log", UIMessageType.Error);
             }
         }
 
@@ -1530,8 +1627,8 @@ namespace UmaPetForge
 
             _pickerPreviewError = failure.Message;
             _pickerStatus = "Preview failed: " + failure.Message;
-            Logger.LogError("UmaPetForge Mini preview failed: " + failure);
-            ShowViewerMessage("UmaPetForge preview failed — retry in F6", UIMessageType.Error);
+            Logger.LogError("UmaCodexPet Mini preview failed: " + failure);
+            ShowViewerMessage("UmaCodexPet preview failed — retry in F6", UIMessageType.Error);
         }
 
         private IEnumerator LoadPickerPreviewCore(
@@ -1627,7 +1724,7 @@ namespace UmaPetForge
                 " Mini" + (motion == null
                     ? "."
                     : " — " + GetFriendlyMotionName(motion) + ".");
-            ShowViewerMessage("UmaPetForge Mini preview ready", UIMessageType.Success);
+            ShowViewerMessage("UmaCodexPet Mini preview ready", UIMessageType.Success);
         }
 
         private string ResolvePickerPreviewCostume(int characterId)
@@ -2064,7 +2161,7 @@ namespace UmaPetForge
             if (requireCharacter && _pickerSelected.Count == 0)
             {
                 _pickerStatus = "Select at least one character.";
-                ShowViewerMessage("UmaPetForge: select at least one character", UIMessageType.Error);
+                ShowViewerMessage("UmaCodexPet: select at least one character", UIMessageType.Error);
                 return false;
             }
 
@@ -2174,7 +2271,7 @@ namespace UmaPetForge
             _pickerStatus = "Saved " + _pickerSelected.Count + " characters.";
             Logger.LogInfo("Character picker saved: " + value);
             ShowViewerMessage(
-                "UmaPetForge saved " + _pickerSelected.Count + " characters",
+                "UmaCodexPet saved " + _pickerSelected.Count + " characters",
                 UIMessageType.Success);
             return true;
         }
@@ -2201,7 +2298,7 @@ namespace UmaPetForge
             {
                 Logger.LogError(exception);
                 _pickerStatus = "Could not save selection — check log.";
-                ShowViewerMessage("UmaPetForge picker save failed", UIMessageType.Error);
+                ShowViewerMessage("UmaCodexPet picker save failed", UIMessageType.Error);
             }
         }
 
@@ -2228,7 +2325,7 @@ namespace UmaPetForge
 
             _viewerReady = true;
             Logger.LogInfo("UmaViewer is ready. Press F6 for the picker, F7 for catalogs, or F8 to export.");
-            ShowViewerMessage("UmaPetForge ready — F6 picker / F7 catalogs / F8 export", UIMessageType.Success);
+            ShowViewerMessage("UmaCodexPet ready — F6 picker / F7 catalogs / F8 export", UIMessageType.Success);
         }
 
         private IEnumerator ExportBatch()
@@ -2266,7 +2363,7 @@ namespace UmaPetForge
             if (failure != null)
             {
                 Logger.LogError(failure);
-                ShowViewerMessage("UmaPetForge failed — check BepInEx log", UIMessageType.Error);
+                ShowViewerMessage("UmaCodexPet failed — check BepInEx log", UIMessageType.Error);
             }
 
             _running = false;
@@ -2304,7 +2401,7 @@ namespace UmaPetForge
                 cameraState = CameraState.Capture(Camera.main, UmaViewerBuilder.Instance);
                 cameraState.PrepareForExport();
                 Logger.LogInfo("Exporting " + roster.Count + " characters to " + runRoot);
-                ShowViewerMessage("UmaPetForge export started", UIMessageType.Default);
+                ShowViewerMessage("UmaCodexPet export started", UIMessageType.Default);
 
                 foreach (CharaEntry character in roster)
                 {
@@ -2316,13 +2413,13 @@ namespace UmaPetForge
                 WriteExportManifest(Path.Combine(runRoot, "export-manifest.json"), results);
                 File.WriteAllText(
                     Path.Combine(runRoot, "EXPORT_COMPLETE.txt"),
-                    "UmaPetForge completed at " + DateTimeOffset.Now.ToString("O", CultureInfo.InvariantCulture) +
+                    "UmaCodexPet completed at " + DateTimeOffset.Now.ToString("O", CultureInfo.InvariantCulture) +
                     Environment.NewLine + "Characters attempted: " + results.Count + Environment.NewLine,
                     new UTF8Encoding(false));
 
                 int succeeded = results.Count(result => result.Success);
                 Logger.LogInfo("Export complete: " + succeeded + "/" + results.Count + " characters succeeded. " + runRoot);
-                ShowViewerMessage("UmaPetForge complete: " + succeeded + "/" + results.Count, UIMessageType.Success);
+                ShowViewerMessage("UmaCodexPet complete: " + succeeded + "/" + results.Count, UIMessageType.Success);
             }
             finally
             {
@@ -3914,7 +4011,7 @@ namespace UmaPetForge
             string configured = (_outputDirectory.Value ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(configured))
             {
-                configured = "UmaPetForge_Output";
+                configured = DefaultOutputDirectory;
             }
             string outputRoot = ResolveViewerRelativePath(configured, "OutputDirectory");
 
@@ -3928,7 +4025,7 @@ namespace UmaPetForge
             string configuredOutput = (_outputDirectory.Value ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(configuredOutput))
             {
-                configuredOutput = "UmaPetForge_Output";
+                configuredOutput = DefaultOutputDirectory;
             }
             string outputRoot = ResolveViewerRelativePath(configuredOutput, "OutputDirectory");
             string catalogDirectory = Path.Combine(outputRoot, "catalog");
@@ -3952,7 +4049,7 @@ namespace UmaPetForge
                 "Press F6 in UmaViewer for the searchable character picker." +
                 Environment.NewLine +
                 "Advanced fallback: edit Characters in " +
-                "BepInEx\\config\\dev.pqqqqq.umapetforge.cfg." +
+                "BepInEx\\config\\dev.pqqqqq.umacodexpet.cfg." +
                 Environment.NewLine +
                 "Use comma-separated display names or numeric IDs from characters.json." +
                 Environment.NewLine + Environment.NewLine +
@@ -3970,7 +4067,7 @@ namespace UmaPetForge
                 Environment.NewLine +
                 "The picker is resizable, and its input is isolated from UmaViewer controls while open." +
                 Environment.NewLine +
-                "Choosing a motion previews it immediately. If needed, UmaPetForge first loads that Mini with the clothes selected in F6." +
+                "Choosing a motion previews it immediately. If needed, UmaCodexPet first loads that Mini with the clothes selected in F6." +
                 Environment.NewLine +
                 "Leave a motion on Auto to use the advanced CSV fallback, then automatic selection." +
                 Environment.NewLine +
@@ -4016,7 +4113,7 @@ namespace UmaPetForge
             }
             File.WriteAllText(
                 path,
-                "# UmaPetForge optional per-character motion overrides" + Environment.NewLine +
+                "# UmaCodexPet optional per-character motion overrides" + Environment.NewLine +
                 "# character_id,state,motion_key_or_path" + Environment.NewLine +
                 "# Exactly three unquoted fields; commas inside values are not supported." +
                 Environment.NewLine +

@@ -1,6 +1,6 @@
 # Security policy
 
-UmaPetForge is a local desktop plugin. It runs inside UmaViewer, reads asset
+UmaCodexPet is a local desktop plugin. It runs inside UmaViewer, reads asset
 metadata that UmaViewer has already indexed, and writes images to disk. Treat
 the plugin with the same trust you give any other executable loaded into a
 desktop application.
@@ -25,7 +25,7 @@ not include vulnerability details in the issue.
 
 Include:
 
-- the affected UmaPetForge and UmaViewer versions;
+- the affected UmaCodexPet and UmaViewer versions;
 - the Windows and BepInEx versions;
 - clear reproduction steps;
 - the security impact and realistic attack conditions; and
@@ -41,12 +41,12 @@ report, coordinate a fix and release, and credit the reporter if requested.
 ## Scope
 
 Reports about unsafe file handling, path traversal, unintended network access,
-arbitrary code execution introduced by UmaPetForge, or insecure release
+arbitrary code execution introduced by UmaCodexPet, or insecure release
 packaging are in scope.
 
 Bugs in Uma Musume: Pretty Derby, UmaViewer, Unity, BepInEx, or the operating
 system should be reported to their respective maintainers. A dependency issue
-is in scope here when UmaPetForge makes it exploitable in a new way or can
+is in scope here when UmaCodexPet makes it exploitable in a new way or can
 reasonably mitigate it.
 
 ## Release safety

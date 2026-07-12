@@ -4,6 +4,9 @@ All notable user-facing changes are recorded here.
 
 ## 0.3.0 - 2026-07-12
 
+- Renamed the project, plugin, package, configuration, and output paths from
+  **UmaPetForge** to **UmaCodexPet**. Existing picker selections are imported
+  once from the legacy config, and the old file is retained as a backup.
 - Added an <kbd>F6</kbd> **Animations/Face** page with separate per-character
   motion and static Mini face choices for all nine canonical pet states.
 - Added searchable, human-readable compatible motion lists whose friendly

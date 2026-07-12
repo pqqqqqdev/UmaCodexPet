@@ -1,4 +1,4 @@
-name: Build UmaPetForge
+name: Build UmaCodexPet
 
 on:
   push:
@@ -68,16 +68,16 @@ jobs:
       - name: Set build version
         shell: pwsh
         run: |
-          [xml]$project = Get-Content "src/UmaPetForge/UmaPetForge.csproj"
+          [xml]$project = Get-Content "src/UmaCodexPet/UmaCodexPet.csproj"
           $projectVersion = [string]($project.Project.PropertyGroup.VersionPrefix | Select-Object -First 1)
           if ([string]::IsNullOrWhiteSpace($projectVersion)) {
-            throw "VersionPrefix is missing from UmaPetForge.csproj."
+            throw "VersionPrefix is missing from UmaCodexPet.csproj."
           }
 
-          $pluginSource = Get-Content "src/UmaPetForge/UmaPetForgePlugin.cs" -Raw
+          $pluginSource = Get-Content "src/UmaCodexPet/UmaCodexPetPlugin.cs" -Raw
           $pluginVersionMatch = [regex]::Match($pluginSource, 'PluginVersion\s*=\s*"([^"]+)"')
           if (-not $pluginVersionMatch.Success) {
-            throw "PluginVersion is missing from UmaPetForgePlugin.cs."
+            throw "PluginVersion is missing from UmaCodexPetPlugin.cs."
           }
           $pluginVersion = $pluginVersionMatch.Groups[1].Value
           if ($pluginVersion -ne $projectVersion) {
@@ -102,7 +102,7 @@ jobs:
       - name: Create release archive
         shell: pwsh
         run: |
-          $archive = "artifacts/UmaPetForge-$env:VERSION.zip"
+          $archive = "artifacts/UmaCodexPet-$env:VERSION.zip"
           Compress-Archive -Path "artifacts/package/*" -DestinationPath $archive -Force
           $checksum = "$archive.sha256"
           $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -112,7 +112,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UmaPetForge-${{ env.VERSION }}
+          name: UmaCodexPet-${{ env.VERSION }}
           path: |
             ${{ env.RELEASE_ARCHIVE }}
             ${{ env.RELEASE_CHECKSUM }}
@@ -129,7 +129,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: UmaPetForge-*
+          pattern: UmaCodexPet-*
           path: release
           merge-multiple: true
 

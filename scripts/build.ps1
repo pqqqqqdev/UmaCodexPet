@@ -9,7 +9,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$project = Join-Path $repoRoot "src/UmaPetForge/UmaPetForge.csproj"
+$project = Join-Path $repoRoot "src/UmaCodexPet/UmaCodexPet.csproj"
 
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     throw "dotnet SDK 8 or newer is required."
@@ -46,19 +46,19 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $buildDir = Join-Path $repoRoot "artifacts/bin/$Configuration/net472"
-$pluginDll = Join-Path $buildDir "UmaPetForge.dll"
+$pluginDll = Join-Path $buildDir "UmaCodexPet.dll"
 if (-not (Test-Path $pluginDll -PathType Leaf)) {
     throw "Expected build output was not produced: $pluginDll"
 }
 
 $packageRoot = Join-Path $repoRoot "artifacts/package"
-$packageDir = Join-Path $packageRoot "BepInEx/plugins/UmaPetForge"
+$packageDir = Join-Path $packageRoot "BepInEx/plugins/UmaCodexPet"
 if (Test-Path $packageRoot) {
     Remove-Item $packageRoot -Recurse -Force
 }
 New-Item $packageDir -ItemType Directory -Force | Out-Null
 Copy-Item $pluginDll $packageDir
-$pdb = Join-Path $buildDir "UmaPetForge.pdb"
+$pdb = Join-Path $buildDir "UmaCodexPet.pdb"
 if (Test-Path $pdb -PathType Leaf) {
     Copy-Item $pdb $packageDir
 }
@@ -82,8 +82,8 @@ foreach ($releaseFile in $releaseFiles) {
 $packageConfigDir = Join-Path $packageRoot "config"
 New-Item $packageConfigDir -ItemType Directory -Force | Out-Null
 $configExamples = @(
-    "dev.pqqqqq.umapetforge.example.cfg",
-    "UmaPetForge_Overrides.example.csv"
+    "dev.pqqqqq.umacodexpet.example.cfg",
+    "UmaCodexPet_Overrides.example.csv"
 )
 foreach ($configExample in $configExamples) {
     $source = Join-Path $repoRoot "config/$configExample"
@@ -94,10 +94,24 @@ foreach ($configExample in $configExamples) {
 }
 
 if ($Install) {
-    $installDir = Join-Path $UmaViewerDir "BepInEx/plugins/UmaPetForge"
+    $pluginsRoot = Join-Path $UmaViewerDir "BepInEx/plugins"
+    $legacyInstallDir = Join-Path $pluginsRoot "UmaPetForge"
+    $legacyFiles = Get-ChildItem $pluginsRoot -File -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -in @("UmaPetForge.dll", "UmaPetForge.pdb") }
+    foreach ($legacyFile in $legacyFiles) {
+        Remove-Item $legacyFile.FullName -Force
+    }
+    if ((Test-Path $legacyInstallDir -PathType Container) -and
+        -not (Get-ChildItem $legacyInstallDir -Force | Select-Object -First 1)) {
+        Remove-Item $legacyInstallDir -Force
+    }
+    if ($legacyFiles.Count -gt 0) {
+        Write-Host "Removed $($legacyFiles.Count) legacy UmaPetForge plugin file(s)"
+    }
+    $installDir = Join-Path $UmaViewerDir "BepInEx/plugins/UmaCodexPet"
     New-Item $installDir -ItemType Directory -Force | Out-Null
-    Copy-Item $pluginDll (Join-Path $installDir "UmaPetForge.dll") -Force
-    Write-Host "Installed $(Join-Path $installDir 'UmaPetForge.dll')"
+    Copy-Item $pluginDll (Join-Path $installDir "UmaCodexPet.dll") -Force
+    Write-Host "Installed $(Join-Path $installDir 'UmaCodexPet.dll')"
 }
 
 Write-Host "Built $pluginDll"
