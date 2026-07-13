@@ -101,12 +101,7 @@ as unverified until documented otherwise.
    <UmaViewer>\BepInEx\plugins\UmaCodexPet\UmaCodexPet.dll
    ```
 
-   **Upgrading from UmaPetForge 0.2 or a private test build:** close
-   UmaViewer and delete `BepInEx\plugins\UmaPetForge\` before extracting the
-   new archive. Do not delete `BepInEx\config\dev.pqqqqq.umapetforge.cfg`;
-   UmaCodexPet imports its characters, clothes, motions, faces, and other
-   settings once, then keeps the legacy file as a rollback backup. Existing
-   `UmaPetForge_Output` exports are left untouched.
+
 
 5. Start UmaViewer and wait for its character lists and preview to finish
    loading.
