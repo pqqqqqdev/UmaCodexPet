@@ -141,9 +141,19 @@ jobs:
             }
           }
 
+          $notesVersion = $projectVersion
+          if ($publishRelease -eq "true") {
+            $notesVersion = $version
+          }
+
           "VERSION=$version" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "version=$version" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "notes_version=$notesVersion" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "publish_release=$publishRelease" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Validate curated release notes
+        shell: pwsh
+        run: ./scripts/extract_release_notes.ps1 -Version "${{ steps.version.outputs.notes_version }}" -OutputPath "$env:RUNNER_TEMP/release-notes.md"
 
       - name: Build and package
         shell: pwsh
@@ -180,6 +190,12 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare curated release notes
+        shell: pwsh
+        run: ./scripts/extract_release_notes.ps1 -Version "${{ needs.build.outputs.version }}" -OutputPath "release-notes.md"
+
       - name: Refuse to overwrite an existing release tag
         if: github.ref_type == 'branch'
         shell: bash
@@ -209,7 +225,7 @@ jobs:
         with:
           files: release/*
           fail_on_unmatched_files: true
-          generate_release_notes: true
+          body_path: release-notes.md
           name: UmaCodexPet v${{ needs.build.outputs.version }}
           overwrite_files: false
           prerelease: ${{ contains(needs.build.outputs.version, '-') }}
