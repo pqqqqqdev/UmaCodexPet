@@ -489,9 +489,11 @@ namespace UmaCodexPet
             try
             {
                 Config.Reload();
-                LoadPickerSelection();
+                InitializePickerDraft();
                 ResetPickerWindowRect();
                 _pickerStatus = string.Empty;
+                _pickerSearch = string.Empty;
+                _pickerScroll = Vector2.zero;
                 _pickerCostumeCharacterId = -1;
                 _pickerCostumeSearch = string.Empty;
                 _pickerMotionCharacterId = -1;
@@ -583,7 +585,7 @@ namespace UmaCodexPet
             SetPickerOpen(false);
         }
 
-        private void LoadPickerSelection()
+        private void InitializePickerDraft()
         {
             _pickerCharacters = UmaViewerMain.Instance.Characters
                 .Where(character => !character.IsMob)
@@ -592,47 +594,10 @@ namespace UmaCodexPet
                 .ToList();
             _miniCostumeOptions = BuildMiniCostumeCatalog(_pickerCharacters);
             _pickerMiniMotions = GetMiniMotions();
-            var availableIds = new HashSet<int>(_pickerCharacters.Select(character => character.Id));
             _pickerSelected.Clear();
-            foreach (CharaEntry character in ResolveRoster(_characters.Value))
-            {
-                if (availableIds.Contains(character.Id))
-                {
-                    _pickerSelected.Add(character.Id);
-                }
-            }
             _pickerCostumes.Clear();
-            foreach (KeyValuePair<int, string> choice in ParseCostumeSelections(_characterCostumes.Value))
-            {
-                if (availableIds.Contains(choice.Key))
-                {
-                    _pickerCostumes[choice.Key] = choice.Value;
-                }
-            }
             _pickerStateMotions.Clear();
-            foreach (KeyValuePair<string, string> choice in
-                     ParsePickerMotionSelections(_characterStateMotions.Value))
-            {
-                int characterId;
-                string stateName;
-                if (TryParsePickerMotionKey(choice.Key, out characterId, out stateName) &&
-                    availableIds.Contains(characterId))
-                {
-                    _pickerStateMotions[choice.Key] = choice.Value;
-                }
-            }
             _pickerStateFaces.Clear();
-            foreach (KeyValuePair<string, MiniFaceSelection> choice in
-                     ParsePickerFaceSelections(_characterStateFaces.Value))
-            {
-                int characterId;
-                string stateName;
-                if (TryParsePickerMotionKey(choice.Key, out characterId, out stateName) &&
-                    availableIds.Contains(characterId))
-                {
-                    _pickerStateFaces[choice.Key] = choice.Value.Clone();
-                }
-            }
         }
 
         private void ResetPickerWindowRect()
@@ -835,13 +800,13 @@ namespace UmaCodexPet
                 SetPickerOpen(false);
             }
 
-            if (GUILayout.Button("Save"))
+            if (GUILayout.Button("Set F8 Batch"))
             {
                 _pickerAction = PickerAction.Save;
             }
             bool previousEnabled = GUI.enabled;
             GUI.enabled = _pickerSelected.Count > 0;
-            if (GUILayout.Button("Save & Export"))
+            if (GUILayout.Button("Set F8 Batch & Export"))
             {
                 _pickerAction = PickerAction.SaveAndExport;
             }
@@ -2292,6 +2257,11 @@ namespace UmaCodexPet
             var savedCostumes = new List<string>();
             foreach (KeyValuePair<int, string> choice in _pickerCostumes.OrderBy(pair => pair.Key))
             {
+                if (!_pickerSelected.Contains(choice.Key))
+                {
+                    continue;
+                }
+
                 List<MiniCostumeOption> options;
                 if (_miniCostumeOptions.TryGetValue(choice.Key, out options) &&
                     options.Any(option =>
@@ -2318,6 +2288,11 @@ namespace UmaCodexPet
                 UmaDatabaseEntry motion = null;
                 if (TryParsePickerMotionKey(choice.Key, out characterId, out stateName))
                 {
+                    if (!_pickerSelected.Contains(characterId))
+                    {
+                        continue;
+                    }
+
                     character = _pickerCharacters.FirstOrDefault(candidate =>
                         candidate.Id == characterId);
                     if (character != null)
@@ -2351,10 +2326,16 @@ namespace UmaCodexPet
                 int characterId;
                 string stateName;
                 string error;
-                bool valid = TryParsePickerMotionKey(
-                        choice.Key,
-                        out characterId,
-                        out stateName) &&
+                bool parsed = TryParsePickerMotionKey(
+                    choice.Key,
+                    out characterId,
+                    out stateName);
+                if (parsed && !_pickerSelected.Contains(characterId))
+                {
+                    continue;
+                }
+
+                bool valid = parsed &&
                     _pickerCharacters.Any(character => character.Id == characterId) &&
                     choice.Value != null &&
                     choice.Value.TryValidate(out error);
@@ -2385,10 +2366,10 @@ namespace UmaCodexPet
                 _pickerStateFaces[saved.Key] = saved.Value.Clone();
             }
             Config.Save();
-            _pickerStatus = "Saved " + _pickerSelected.Count + " characters.";
+            _pickerStatus = "F8 batch set to " + _pickerSelected.Count + " characters.";
             Logger.LogInfo("Character picker saved: " + value);
             ShowViewerMessage(
-                "UmaCodexPet saved " + _pickerSelected.Count + " characters",
+                "UmaCodexPet F8 batch set to " + _pickerSelected.Count + " characters",
                 UIMessageType.Success);
             return true;
         }

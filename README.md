@@ -9,10 +9,9 @@ your machine, and assembles transparent PNG atlases in the format expected by
 Codex desktop custom pets. Press <kbd>F6</kbd> to open a searchable character
 picker inside UmaViewer, choose the separate pets and Mini clothes you want,
 choose per-character motions and static Mini faces for all nine canonical pet
-states, and save or export the selection. Fresh installs deliberately
-start with no characters selected, and every motion and face starts on
-**Auto**. <kbd>F7</kbd> still generates catalogs and the optional advanced
-motion-override template.
+states, and set or export the batch. Every F6 session starts clean with no
+characters selected and every outfit, motion, and face on **Auto**. <kbd>F7</kbd>
+still generates catalogs and the optional advanced motion-override template.
 
 No AI-generated character art is involved. No Cygames models, textures,
 animations, databases, game files, UmaViewer binaries, or BepInEx binaries are
@@ -120,9 +119,10 @@ as unverified until documented otherwise.
    loads that Mini directly, and choosing explicit or Auto clothes reloads the
    visible preview. Wait for the preview-ready message before editing motions
    or faces if a load is queued.
-8. Choose **Save** to remember the choices without starting a batch, or
-   **Save & Export** to remember them, close the picker, and export
-   immediately. If you used **Save**, <kbd>F8</kbd> exports the saved selection.
+8. Choose **Set F8 Batch** to use the current choices for the next
+   <kbd>F8</kbd> export, or **Set F8 Batch & Export** to store the same batch,
+   close the picker, and start it immediately. Reopening F6 always starts with
+   a clean picker instead of restoring the previous batch.
 9. For advanced wildcard or file-based motion overrides, press
    <kbd>F7</kbd> to refresh the catalogs and optional override CSV, edit that
    CSV, then press <kbd>F8</kbd>.
@@ -157,11 +157,12 @@ not choose an arbitrary preview target. If several individual choices are made
 while UmaViewer is loading, UmaCodexPet finishes the active load safely and
 keeps only the latest queued choice.
 
-Fresh installs start with zero selected characters. Upgrading from a build that
-still has the exact old 12-character default roster also clears that legacy
-default so the picker starts empty; any custom roster is preserved. **Save**
-may save an empty selection, while **Save & Export** requires at least one
-selected character. Reopening the picker shows the saved choices.
+Every F6 session starts with zero selected characters, Auto clothes, and Auto
+motion/face choices. **Set F8 Batch** may set an empty batch, while **Set F8
+Batch & Export** requires at least one selected character. Reopening the picker
+starts clean even after setting or exporting a batch. The last F8 batch remains
+in the generated config for closed-picker F8 and advanced manual editing, but
+it is never loaded back into a new picker draft.
 
 Editing `Characters` directly remains supported as an advanced fallback. It
 accepts a comma-separated set of display names or numeric IDs:
@@ -187,9 +188,11 @@ Each selected character can use a different outfit. Either choice immediately
 queues a reload of that character for live preview; changing clothes quickly
 replaces obsolete queued reloads with the latest choice.
 
-The picker stores explicit outfit choices in the generated BepInEx setting
-`CharacterCostumes`. Editing it directly is an advanced fallback; its format is
-a semicolon-separated set of `characterId=costumeId` pairs:
+**Set F8 Batch** and **Set F8 Batch & Export** store explicit outfit choices for
+selected characters in the generated BepInEx setting `CharacterCostumes`. A
+new F6 picker does not restore them. Editing the setting directly is an
+advanced fallback; its format is a semicolon-separated set of
+`characterId=costumeId` pairs:
 
 ```ini
 CharacterCostumes = 1001=01;1067=02
@@ -248,8 +251,9 @@ ready. The same **Retry preview** and **Reload selected clothes** controls can
 recover or refresh it. **Auto / default face** keeps the normal Mini face
 without a static override.
 
-F6 selections are stored per character. Editing their generated settings
-directly is supported only as an advanced fallback:
+**Set F8 Batch** and **Set F8 Batch & Export** store F6 choices for selected
+characters, but a new F6 session always starts on Auto. Editing their generated
+settings directly is supported only as an advanced fallback:
 
 ```ini
 CharacterStateMotions = 1001:idle=-4064598427829042606;1001:run_left=4494058001413988142
@@ -563,8 +567,9 @@ selected character, outfit, motion, or face:
    explicit outfit, then Auto, and confirm each reloads the preview. While a
    load is active, choose several characters or outfits quickly and confirm the
    final visible Mini matches the latest choice without closing the picker.
-   Cancel and reopen to confirm drafts were not saved, then repeat with Save
-   and confirm the final character and clothes persist.
+   Cancel and reopen to confirm the picker is clean. Repeat with **Set F8
+   Batch**, reopen F6 to confirm it is still clean, then close it and verify F8
+   exports the batch that was set.
 2. Verify that opening a face editor with a different Mini loaded queues
    the selected character and current F6 clothes. Exercise **Retry preview**
    and **Reload selected clothes** at least once on the test machine.
@@ -576,8 +581,9 @@ selected character, outfit, motion, or face:
 4. Resize the picker from its bottom-right grip. At its minimum and maximum
    sizes, scroll every subpage and confirm that clicking, dragging, or using the
    wheel never changes UmaViewer's FOV, camera height, distance, or scene view.
-5. Save one unique motion and face for each of the nine states, reopen F6, and
-   confirm every choice persists.
+5. Set one unique motion and face for each of the nine states, export, and
+   confirm the manifests contain those choices. Reopen F6 and confirm the new
+   picker starts with every choice on Auto.
 6. Confirm `EXPORT_COMPLETE.txt` exists and the batch and per-character
    manifests report success.
 7. Inspect the encoded `atlas.png` itself: it must be exactly `1536 × 1872`,
